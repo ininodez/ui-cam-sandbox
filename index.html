@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="robots" content="noindex, nofollow">
-  <title>Mobile Eye & Motion Keyboard Sandbox (Mobile &amp; Desktop Live Camera + IMU)</title>
+  <title>Mobile Eye & Motion Keyboard Sandbox (High-Res Eye-Crop + 9-Pt Ridge Calibration)</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -32,8 +32,8 @@
     .key-btn.calib-target {
       background-color: #f59e0b !important;
       color: #ffffff !important;
-      transform: scale(1.16);
-      box-shadow: 0 0 0 5px rgba(245, 158, 11, 0.45);
+      transform: scale(1.18);
+      box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.5);
       z-index: 25;
     }
     .row-active-indicator {
@@ -62,9 +62,9 @@
         <div>
           <div class="flex items-center space-x-1.5">
             <h1 class="text-sm sm:text-base font-bold text-slate-900 leading-tight">Mobile Eye & Motion Keyboard Sandbox</h1>
-            <span class="hidden sm:inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">3D PnP PITCH + VERTICAL BOOST</span>
+            <span class="hidden sm:inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">HIGH-RES EYE CROP + 9-PT RIDGE CALIBRATION</span>
           </div>
-          <p class="text-[11px] sm:text-xs text-slate-500 hidden sm:block">3D Facial PnP Matrix + Canthal Iris + Hardware IMU Pitch Fusion</p>
+          <p class="text-[11px] sm:text-xs text-slate-500 hidden sm:block">Sub-Pixel Dark-Pupil Centroid + Hands-Free Auto-Dwell 9-Point Ridge Regression</p>
         </div>
       </div>
 
@@ -78,9 +78,9 @@
   <main class="flex-1 max-w-7xl w-full mx-auto px-2.5 sm:px-6 py-3 sm:py-6">
 
     <!-- TAB 1: STUDIO -->
-    <div id="view-studio" class="space-y-3 sm:space-y-5">
+    <div id="view-studio" class="space-y-3 sm:space-y-4">
 
-      <!-- LIVE CAMERA + HARDWARE IMU CONTROL BAR -->
+      <!-- LIVE CAMERA + AUTO-DWELL RIDGE CALIBRATION CONTROL BAR -->
       <div class="bg-white rounded-xl border border-blue-200 shadow-sm p-3 sm:p-4">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div class="flex items-center space-x-2.5">
@@ -90,8 +90,8 @@
               </svg>
             </div>
             <div>
-              <h2 class="text-xs sm:text-sm font-bold text-slate-900">Live Selfie Camera + 3D PnP Vertical Pitch Tracker</h2>
-              <p class="text-[11px] text-slate-500" id="camStatusBanner">Tap "1. Start Camera &amp; IMU", then "2. Calibrate 5-Pt" (or tap "Re-Center [G]")</p>
+              <h2 class="text-xs sm:text-sm font-bold text-slate-900">High-Res Eye-Crop + Hands-Free Auto-Dwell 9-Point Calibration</h2>
+              <p class="text-[11px] text-slate-500" id="camStatusBanner">Tap "1. Start Camera &amp; IMU", then "2. Auto-Calibrate 9-Pt (Hands-Free)" — just follow the orange key with your eyes!</p>
             </div>
           </div>
 
@@ -99,30 +99,37 @@
             <button id="btnStartCam" onclick="toggleLiveCamera()" class="flex-1 sm:flex-initial px-3.5 py-2.5 sm:py-2 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold shadow-sm transition">
               1. Start Camera &amp; IMU
             </button>
-            <button id="btnCalib5Pt" onclick="start5PointCalibration()" disabled class="flex-1 sm:flex-initial px-3.5 py-2.5 sm:py-2 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-xs font-bold shadow-sm transition">
-              2. Calibrate 5-Pt (Q-P-G-Z-M)
+            <button id="btnCalib9Pt" onclick="startAuto9PointCalibration()" disabled class="flex-1 sm:flex-initial px-3.5 py-2.5 sm:py-2 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-xs font-bold shadow-sm transition">
+              2. Auto-Calibrate 9-Pt (No Tapping!)
             </button>
             <button id="btnRecenterG" onclick="recenterOnG()" disabled class="px-3 py-2.5 sm:py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-bold shadow-sm transition">
               Re-Center [G]
             </button>
             <select id="selGazeMode" onchange="onChangeGazeMode()" class="w-full sm:w-auto text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 font-medium text-slate-700">
-              <option value="hybrid">Mode: Hybrid Eye + 3D Head/IMU Pitch (Best for Phone &amp; Laptop)</option>
-              <option value="pure_iris">Mode: Pure Eye Iris + Eyelid + Blendshapes</option>
+              <option value="ridge_fusion">Mode 1: 9-Pt Ridge Regression (Eye Crop + Iris + 3D Pose)</option>
+              <option value="head_laser">Mode 2: 3D Head-Pose Laser Pointer (Ultra-Steady, Zero Iris Jitter)</option>
+              <option value="imu_tilt">Mode 3: Mobile IMU Tilt Pointer + Eye Assist (Phone Handheld)</option>
+              <option value="pure_eye">Mode 4: Pure Eye-in-Orbit Only (Head Fixed)</option>
             </select>
           </div>
         </div>
 
-        <!-- Vertical Sensitivity & Row Snap Control Strip -->
-        <div class="mt-2.5 pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div class="flex items-center space-x-2 flex-1 min-w-[220px]">
-            <span class="font-semibold text-slate-700 whitespace-nowrap">Vertical Gain (Y):</span>
-            <input type="range" id="sliderVertGain" min="0.8" max="3.5" step="0.1" value="1.8" class="flex-1 accent-blue-600" oninput="updateVertGainLabel()">
-            <span id="labelVertGain" class="mono font-bold text-blue-700 w-10 text-right">1.8×</span>
+        <!-- Gain & Smoothing Sliders -->
+        <div class="mt-2.5 pt-2.5 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-center text-xs">
+          <div class="flex items-center space-x-2">
+            <span class="font-semibold text-slate-700 whitespace-nowrap">Horiz Gain (X):</span>
+            <input type="range" id="sliderHorizGain" min="0.5" max="2.5" step="0.1" value="1.0" class="flex-1 accent-blue-600" oninput="updateGainLabels()">
+            <span id="labelHorizGain" class="mono font-bold text-blue-700 w-9 text-right">1.0×</span>
           </div>
-          <div class="flex items-center space-x-3">
+          <div class="flex items-center space-x-2">
+            <span class="font-semibold text-slate-700 whitespace-nowrap">Vert Gain (Y):</span>
+            <input type="range" id="sliderVertGain" min="0.5" max="3.0" step="0.1" value="1.3" class="flex-1 accent-blue-600" oninput="updateGainLabels()">
+            <span id="labelVertGain" class="mono font-bold text-blue-700 w-9 text-right">1.3×</span>
+          </div>
+          <div class="flex items-center justify-end space-x-2">
             <label class="inline-flex items-center space-x-1.5 text-xs text-slate-700 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 cursor-pointer">
               <input type="checkbox" id="chkRowSnap" checked class="accent-blue-600">
-              <span>Magnetic Row Snap</span>
+              <span>Row Snap</span>
             </label>
             <label class="inline-flex items-center space-x-1.5 text-xs text-slate-700 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 cursor-pointer">
               <input type="checkbox" id="chkMouthClutch" checked class="accent-blue-600">
@@ -131,64 +138,71 @@
           </div>
         </div>
 
-        <!-- Collapsible Live Video Feed + Iris + IMU Telemetry -->
+        <!-- Collapsible Live Video Feed + High-Res Eye-Crop Inspector -->
         <div id="liveCamContainer" class="hidden mt-3 pt-3 border-t border-slate-100 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-          <div class="md:col-span-4 relative bg-slate-950 rounded-xl overflow-hidden border border-slate-800 aspect-video max-h-40 sm:max-h-none mx-auto w-full">
+          <div class="md:col-span-4 relative bg-slate-950 rounded-xl overflow-hidden border border-slate-800 aspect-video max-h-36 sm:max-h-none mx-auto w-full">
             <video id="webcamVideo" autoplay playsinline muted class="w-full h-full object-cover transform -scale-x-100"></video>
             <canvas id="webcamOverlay" class="absolute inset-0 w-full h-full pointer-events-none transform -scale-x-100"></canvas>
             <div class="absolute top-1.5 left-1.5 bg-black/75 text-emerald-400 text-[10px] font-mono px-2 py-0.5 rounded" id="camHudTop">
               Initializing MediaPipe 3D FaceLandmarker...
             </div>
             <div class="absolute bottom-1.5 left-1.5 bg-black/75 text-cyan-300 text-[10px] font-mono px-2 py-0.5 rounded" id="camHudBottom">
-              3D PnP Matrix + IMU Ready
+              Sub-Pixel Dark Pupil Crop Active
             </div>
           </div>
           <div class="md:col-span-8 space-y-2 text-xs">
-            <div class="p-2.5 bg-slate-50 rounded-lg border border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-[11px]">
-              <div>
-                <div class="text-[9px] text-slate-400 uppercase">Gaze Feature (gx, gy)</div>
-                <div id="liveIrisUV" class="font-bold text-slate-800">gx: 0.00 | gy: 0.00</div>
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+              <!-- Live High-Res Cropped Left & Right Eye Patch Inspector -->
+              <div class="sm:col-span-4 bg-slate-900 rounded-lg p-1.5 border border-slate-800 flex flex-col items-center">
+                <div class="text-[9px] text-slate-400 font-mono mb-1">NATIVE HI-RES EYE CROPS (PUPIL)</div>
+                <canvas id="eyePatchCanvas" width="160" height="44" class="w-full h-11 rounded bg-black border border-slate-700"></canvas>
               </div>
-              <div>
-                <div class="text-[9px] text-slate-400 uppercase">3D PnP Yaw / Pitch</div>
-                <div id="liveHeadAngles" class="font-bold text-indigo-600">Y: 0.0° | P: 0.0°</div>
-              </div>
-              <div>
-                <div class="text-[9px] text-slate-400 uppercase">Active Keyboard Row</div>
-                <div id="liveActiveRow" class="font-bold text-blue-600">ROW 2 (HOME A-L)</div>
-              </div>
-              <div>
-                <div class="text-[9px] text-slate-400 uppercase">Tap Jerk / Clutch</div>
-                <div id="liveMouthState" class="font-bold text-slate-700">EYES OPEN | IDLE</div>
+              <div class="sm:col-span-8 p-2.5 bg-slate-50 rounded-lg border border-slate-200 grid grid-cols-3 gap-2 font-mono text-[11px]">
+                <div>
+                  <div class="text-[9px] text-slate-400 uppercase">Pupil + Iris</div>
+                  <div id="liveIrisUV" class="font-bold text-slate-800">u:0.00 v:0.00</div>
+                </div>
+                <div>
+                  <div class="text-[9px] text-slate-400 uppercase">3D Head Pose</div>
+                  <div id="liveHeadAngles" class="font-bold text-indigo-600">Y:0.0° P:0.0°</div>
+                </div>
+                <div>
+                  <div class="text-[9px] text-slate-400 uppercase">Calibration Fit</div>
+                  <div id="liveCalibQuality" class="font-bold text-amber-600">Uncalibrated</div>
+                </div>
               </div>
             </div>
             <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs leading-snug" id="calibInstructionBox">
-              <strong>Why vertical works now:</strong> Uses MediaPipe's <strong>4×4 3D PnP Transformation Matrix</strong> + nose-to-tragion pitch lever + upper-eyelid vertical tracking + mobile IMU pitch. Tap <strong>"Re-Center [G]"</strong> while looking at <strong>G</strong> for instant 1-tap setup, or <strong>"2. Calibrate 5-Pt"</strong> for full corner calibration!
+              <strong>Hands-Free Auto-Dwell Calibration:</strong> Tap <strong>"2. Auto-Calibrate 9-Pt"</strong> once, then <strong>DO NOT tap the screen</strong>—just keep your eyes on each orange key as it automatically counts down through <strong>Q → T → P → A → G → L → Z → B → M</strong> (~1.2 sec per key). Or switch to <strong>Mode 2 (3D Head-Pose Laser)</strong> or <strong>Mode 3 (Mobile IMU Tilt)</strong> for zero-jitter pointing!
             </div>
           </div>
         </div>
       </div>
 
-      <!-- MOBILE TOUCH CALIBRATION BANNER (Visible only during 5-point calibration) -->
-      <div id="mobileCalibBanner" class="hidden bg-amber-500 text-white rounded-xl p-3 shadow-md flex items-center justify-between">
-        <div class="text-xs sm:text-sm font-bold" id="mobileCalibPrompt">
-          Look at orange key [Q] (Point 1 of 5)
+      <!-- HANDS-FREE AUTO-CALIBRATION PROGRESS BANNER -->
+      <div id="mobileCalibBanner" class="hidden bg-amber-500 text-white rounded-xl p-3 shadow-md space-y-1.5">
+        <div class="flex items-center justify-between">
+          <div class="text-xs sm:text-sm font-extrabold" id="mobileCalibPrompt">
+            KEEP LOOKING AT ORANGE KEY [Q] (Point 1 of 9) — DO NOT TAP!
+          </div>
+          <span id="mobileCalibPct" class="text-xs font-mono font-bold bg-black/25 px-2 py-0.5 rounded">0%</span>
         </div>
-        <button onclick="triggerCalibBurst()" class="px-4 py-2 rounded-lg bg-white text-amber-900 font-extrabold text-xs sm:text-sm shadow active:scale-95 transition">
-          TAP TO RECORD POINT
-        </button>
+        <div class="w-full h-2 bg-amber-800/40 rounded-full overflow-hidden">
+          <div id="mobileCalibBar" class="h-full bg-white transition-all duration-75" style="width: 0%"></div>
+        </div>
       </div>
 
-      <!-- Main Grid: Keyboard First on Mobile! -->
+      <!-- Main Grid: Keyboard First! -->
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6" id="mainStudioGrid">
 
-        <!-- Right/Top Column: Interactive Gaze-Swipe Keyboard (Order 1 on Mobile!) -->
+        <!-- Interactive Gaze-Swipe Keyboard -->
         <div class="lg:col-span-12 order-1 space-y-4" id="rightColKb">
           <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-3 sm:p-6 space-y-3 sm:space-y-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <div class="flex items-center flex-wrap gap-2">
                 <h2 class="text-xs sm:text-sm font-bold text-slate-800">Gaze-Swipe QWERTY Surface</h2>
                 <span id="hoveredKeyBadge" class="px-2 py-0.5 text-xs rounded bg-blue-50 text-blue-700 border border-blue-200 mono font-semibold">Gaze Target: -</span>
+                <span id="liveActiveRow" class="px-2 py-0.5 text-xs rounded bg-slate-100 text-slate-700 mono font-medium">ROW 2 (HOME)</span>
               </div>
               <div class="flex flex-wrap items-center gap-1">
                 <button onclick="triggerDemoWord('HELLO')" class="px-2 py-1 text-[11px] font-medium rounded bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300">Demo "HELLO"</button>
@@ -212,7 +226,7 @@
               </div>
             </div>
 
-            <!-- Keyboard Surface (Taller Vertical Row Spacing for Easy Row 1 / Row 2 / Row 3 Separation!) -->
+            <!-- Keyboard Surface -->
             <div class="relative bg-slate-100 rounded-xl p-2.5 sm:p-5 border border-slate-200 overflow-hidden select-none" id="kbContainer">
               <canvas id="kbCanvas" class="absolute inset-0 w-full h-full pointer-events-none z-10"></canvas>
               <div class="space-y-4 sm:space-y-5 relative z-0 py-1" id="kbRowsWrapper">
@@ -246,8 +260,8 @@
                 <span id="diagLambda" class="font-bold text-slate-800 mono ml-1">0.44 (Full)</span>
               </div>
               <div>
-                <span class="text-slate-500">IMU Compensation:</span>
-                <span id="diagYaw" class="font-bold text-indigo-600 mono ml-1">Active (6-DoF)</span>
+                <span class="text-slate-500">IMU / Mouth State:</span>
+                <span id="liveMouthState" class="font-bold text-indigo-600 mono ml-1">IDLE</span>
               </div>
               <div>
                 <span class="text-slate-500">Solver Latency:</span>
@@ -397,7 +411,7 @@
   <script>
     // --- 1-EURO ADAPTIVE LOW-PASS FILTER ---
     class OneEuroFilter {
-      constructor(minCutoff = 1.0, beta = 0.04, dCutoff = 1.0) {
+      constructor(minCutoff = 0.85, beta = 0.035, dCutoff = 1.0) {
         this.minCutoff = minCutoff;
         this.beta = beta;
         this.dCutoff = dCutoff;
@@ -429,8 +443,8 @@
       }
     }
 
-    const filterX = new OneEuroFilter(0.95, 0.04, 1.0);
-    const filterY = new OneEuroFilter(0.85, 0.05, 1.0);
+    const filterScreenX = new OneEuroFilter(0.9, 0.03, 1.0);
+    const filterScreenY = new OneEuroFilter(0.8, 0.03, 1.0);
 
     function switchTab(tabId) {
       ['studio', 'benchmark'].forEach(t => {
@@ -471,12 +485,10 @@
           btn.className = 'key-btn flex-1 max-w-[74px] h-14 sm:h-16 bg-white rounded-lg sm:rounded-xl border border-slate-300 shadow-sm flex items-center justify-center font-bold text-sm sm:text-lg text-slate-800 cursor-pointer';
           btn.innerText = ch;
           btn.id = 'key-' + ch;
-          btn.onclick = () => onKeyClickDuringCalib(ch);
           rowDiv.appendChild(btn);
           keyElements[ch] = btn;
         });
       });
-      if (calibStep >= 0) highlightCalibKey();
       setTimeout(measureKeyCoordinates, 80);
     }
 
@@ -507,10 +519,13 @@
     let headShift = { x: 0, y: 0 };
     let yawDriftDeg = 0;
     let activeTrajectory = [];
-    let vertGain = 1.8;
+    let horizGain = 1.0;
+    let vertGain = 1.3;
 
-    function updateVertGainLabel() {
-      vertGain = parseFloat(document.getElementById('sliderVertGain').value) || 1.8;
+    function updateGainLabels() {
+      horizGain = parseFloat(document.getElementById('sliderHorizGain').value) || 1.0;
+      vertGain = parseFloat(document.getElementById('sliderVertGain').value) || 1.3;
+      document.getElementById('labelHorizGain').innerText = horizGain.toFixed(1) + '×';
       document.getElementById('labelVertGain').innerText = vertGain.toFixed(1) + '×';
     }
 
@@ -536,8 +551,8 @@
           hwImu.baseBeta = hwImu.beta;
           hwImu.baseGamma = hwImu.gamma;
         }
-        hwImu.deltaPitch = Math.max(-35, Math.min(35, hwImu.beta - hwImu.baseBeta));
-        hwImu.deltaRoll = Math.max(-35, Math.min(35, hwImu.gamma - hwImu.baseGamma));
+        hwImu.deltaPitch = Math.max(-40, Math.min(40, hwImu.beta - hwImu.baseBeta));
+        hwImu.deltaRoll = Math.max(-40, Math.min(40, hwImu.gamma - hwImu.baseGamma));
         let dy = hwImu.alpha - hwImu.baseAlpha;
         if (dy > 180) dy -= 360;
         if (dy < -180) dy += 360;
@@ -557,14 +572,13 @@
       });
     }
 
-    // Live MediaPipe Webcam State
+    // Live MediaPipe Webcam + High-Res Eye Crop State
     let liveCameraActive = false;
     let faceLandmarker = null;
-    let gazeMode = 'hybrid';
-    let centerBaseline = null; // Baseline (gx0, gy0) when looking at center key [G]
+    let gazeMode = 'ridge_fusion';
+    let centerBaseline = null; // Baseline feature vector when looking at [G]
+    let currentFeatureVec = [0, 0, 0, 0, 0, 0]; // [eyeU, eyeV, cropU, cropV, headYawDeg, headPitchDeg]
     let currentEyeFeatures = {
-      gx: 0.0, gy: 0.0,
-      yawDeg: 0.0, pitchDeg: 0.0,
       headX: 0, headY: 0, headZ: 420,
       isBlinking: false,
       mouthOpen: false,
@@ -572,20 +586,16 @@
     };
     let smoothedGazePt = { x: 200, y: 110 };
 
-    // 5-Point Calibration State
-    const CALIB_KEYS = ["Q", "P", "G", "Z", "M"];
+    // Hands-Free 9-Point Auto-Dwell Calibration State
+    const CALIB_KEYS_9 = ["Q", "T", "P", "A", "G", "L", "Z", "B", "M"];
     let calibStep = -1;
-    let calibBurstBuffer = [];
-    let isCollectingBurst = false;
-    let calibSamples = [];
-    let calibModel = null;
+    let calibPointStartMs = 0;
+    let calibAllObs = []; // Array of { f: [6], x, y, key }
+    let ridgeModel = null; // { mean: [6], std: [6], wx: [7], wy: [7] }
 
     function onChangeGazeMode() {
       gazeMode = document.getElementById('selGazeMode').value;
-      calibModel = null;
-      centerBaseline = null;
-      document.getElementById('calibInstructionBox').innerHTML =
-        `<strong>Switched to ${gazeMode === 'hybrid' ? 'Hybrid Eye + 3D Head/IMU Pitch Mode' : 'Pure Eye Iris + Eyelid Mode'}:</strong> Look at <strong>[G]</strong> and tap <strong>"Re-Center [G]"</strong>, or tap <strong>"2. Calibrate 5-Pt"</strong>.`;
+      recenterOnG();
     }
 
     function recenterOnG() {
@@ -595,23 +605,15 @@
         hwImu.baseBeta = hwImu.beta;
         hwImu.baseGamma = hwImu.gamma;
       }
-      centerBaseline = { gx: currentEyeFeatures.gx, gy: currentEyeFeatures.gy };
-      if (calibModel) {
-        // Shift existing 5-point model center to match current G posture
-        const gPt = keyCenters['G'] || { x: 200, y: 110 };
-        calibModel.gxCenter = currentEyeFeatures.gx;
-        calibModel.gyCenter = currentEyeFeatures.gy;
-        calibModel.xCenter = gPt.x;
-        calibModel.yCenter = gPt.y;
-      }
+      centerBaseline = [...currentFeatureVec];
       document.getElementById('calibInstructionBox').innerHTML =
-        `<strong class="text-emerald-800">Re-Centered on [G]!</strong> Move your eyes/head up to Row 1 (Q–P) and down to Row 3 (Z–M). Adjust the <strong>Vertical Gain (Y)</strong> slider if you want faster vertical motion.`;
+        `<strong class="text-emerald-800">Re-Centered on [G]!</strong> Current Mode: <strong>${document.getElementById('selGazeMode').selectedOptions[0].text}</strong>. Use the X/Y Gain sliders above to tune travel speed.`;
     }
 
     async function toggleLiveCamera() {
       const container = document.getElementById('liveCamContainer');
       const btn = document.getElementById('btnStartCam');
-      const calibBtn = document.getElementById('btnCalib5Pt');
+      const calibBtn = document.getElementById('btnCalib9Pt');
       const recenterBtn = document.getElementById('btnRecenterG');
       if (liveCameraActive) {
         liveCameraActive = false;
@@ -662,7 +664,7 @@
         calibBtn.disabled = false;
         recenterBtn.disabled = false;
         btn.innerText = 'Stop Camera';
-        document.getElementById('camHudTop').innerText = `LIVE: ${video.videoWidth || 640}x${video.videoHeight || 480} 3D PnP + Iris`;
+        document.getElementById('camHudTop').innerText = `LIVE: ${video.videoWidth || 640}x${video.videoHeight || 480} Hi-Res Eye Crop`;
         measureKeyCoordinates();
         requestAnimationFrame(processWebcamFrame);
       } catch (err) {
@@ -671,7 +673,72 @@
       }
     }
 
-    // Aspect-Ratio-Corrected Pixel-Space Canthal + Upper-Eyelid Vertical Gaze Extractor
+    // High-Resolution Native Video Eye-Crop Dark-Pupil Centroid Extractor
+    // Bypasses MediaPipe's 192x192 full-face downsampling by computing the cubic darkness-weighted
+    // image moment centroid (M10/M00, M01/M00) directly on the native video pixels inside each eye socket!
+    function extractHighResEyePatchCentroid(video, patchCtx, slotIdx, cLeft, cRight, lTop, lBot, vw, vh) {
+      const x1 = cLeft.x * vw, y1 = cLeft.y * vh;
+      const x2 = cRight.x * vw, y2 = cRight.y * vh;
+      const cx = 0.5 * (x1 + x2), cy = 0.5 * (y1 + y2);
+      const eyeW = Math.max(16, Math.hypot(x2 - x1, y2 - y1));
+      const cropW = eyeW * 1.15;
+      const cropH = eyeW * 0.62;
+      const sx = Math.max(0, Math.min(vw - cropW, cx - cropW * 0.5));
+      const sy = Math.max(0, Math.min(vh - cropH, cy - cropH * 0.5));
+
+      const dstX = slotIdx * 80;
+      const dstW = 80, dstH = 44;
+      patchCtx.drawImage(video, sx, sy, cropW, cropH, dstX, 0, dstW, dstH);
+
+      const imgData = patchCtx.getImageData(dstX + 10, 6, dstW - 20, dstH - 12);
+      const data = imgData.data;
+      const pw = dstW - 20, ph = dstH - 12;
+
+      // Pass 1: find min and 75th-percentile Red-channel intensity (iris/pupil is darkest in Red vs sclera)
+      let minR = 255, maxR = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        if (r < minR) minR = r;
+        if (r > maxR) maxR = r;
+      }
+      const thresh = minR + Math.max(12, (maxR - minR) * 0.38);
+
+      // Pass 2: cubic darkness-weighted centroid
+      let sumW = 0, sumX = 0, sumY = 0;
+      for (let py = 0; py < ph; py++) {
+        for (let px = 0; px < pw; px++) {
+          const idx = (py * pw + px) * 4;
+          const r = data[idx];
+          if (r < thresh) {
+            const d = thresh - r;
+            const w = d * d * d;
+            sumW += w;
+            sumX += w * px;
+            sumY += w * py;
+          }
+        }
+      }
+
+      const centX = sumW > 0 ? (sumX / sumW) : (pw * 0.5);
+      const centY = sumW > 0 ? (sumY / sumW) : (ph * 0.5);
+
+      // Draw Magenta Crosshair on the live Eye Patch Inspector canvas
+      const drawPx = dstX + 10 + centX;
+      const drawPy = 6 + centY;
+      patchCtx.strokeStyle = '#f43f5e';
+      patchCtx.lineWidth = 1.5;
+      patchCtx.beginPath();
+      patchCtx.moveTo(drawPx - 5, drawPy); patchCtx.lineTo(drawPx + 5, drawPy);
+      patchCtx.moveTo(drawPx, drawPy - 5); patchCtx.lineTo(drawPx, drawPy + 5);
+      patchCtx.stroke();
+
+      // Return normalized offset (-0.5 to +0.5)
+      return {
+        u: (centX / pw) - 0.5,
+        v: (centY / ph) - 0.5
+      };
+    }
+
     function computePixelEyeFeatures(iris, cornerLeft, cornerRight, upperLid, lowerLid, w, h) {
       const cLx = cornerLeft.x * w, cLy = cornerLeft.y * h;
       const cRx = cornerRight.x * w, cRy = cornerRight.y * h;
@@ -683,9 +750,8 @@
       const cy = 0.5 * (cLy + cRy);
       const dx = cRx - cLx;
       const dy = cRy - cLy;
-      const eyeWidthPx = Math.max(4.0, Math.hypot(dx, dy));
+      const eyeWidthPx = Math.max(6.0, Math.hypot(dx, dy));
 
-      // True orthogonal pixel unit axes along the rigid inner/outer canthal line
       const exX = dx / eyeWidthPx, exY = dy / eyeWidthPx;
       const eyX = -exY, eyY = exX;
 
@@ -694,8 +760,6 @@
       const uIris = relIx * exX + relIy * exY;
       const vIrisCanthal = relIx * eyX + relIy * eyY;
 
-      // Upper & lower eyelid vertical position relative to the rigid canthal axis:
-      // When the eyeball rotates up/down, the upper eyelid tracks the cornea vertically!
       const relTopX = (topX - cx) / eyeWidthPx;
       const relTopY = (topY - cy) / eyeWidthPx;
       const vUpperLid = relTopX * eyX + relTopY * eyY;
@@ -704,21 +768,24 @@
       const relBotY = (botY - cy) / eyeWidthPx;
       const vLowerLid = relBotX * eyX + relBotY * eyY;
 
-      // Combine iris center + upper/lower lid shift relative to rigid corners
-      const vCombined = vIrisCanthal * 1.6 + vUpperLid * 0.9 + vLowerLid * 0.5;
-      return { u: uIris, v: vCombined };
+      return {
+        u: uIris,
+        v: vIrisCanthal * 1.5 + vUpperLid * 0.85 + vLowerLid * 0.45
+      };
     }
 
     function processWebcamFrame() {
       if (!liveCameraActive) return;
       const video = document.getElementById('webcamVideo');
       const overlay = document.getElementById('webcamOverlay');
+      const patchCanvas = document.getElementById('eyePatchCanvas');
       const nowMs = performance.now();
 
       if (video.readyState >= 2 && faceLandmarker) {
         const w = overlay.width = video.videoWidth || 640;
         const h = overlay.height = video.videoHeight || 480;
         const ctx = overlay.getContext('2d');
+        const patchCtx = patchCanvas.getContext('2d');
         ctx.clearRect(0, 0, w, h);
 
         const res = faceLandmarker.detectForVideo(video, nowMs);
@@ -749,7 +816,6 @@
             const map = {};
             for (let i = 0; i < cats.length; i++) map[cats[i].categoryName] = cats[i].score;
             bsX = ((map.eyeLookOutRight || 0) - (map.eyeLookInRight || 0) + (map.eyeLookInLeft || 0) - (map.eyeLookOutLeft || 0)) * 0.5;
-            // Weight eyeLookDown and eyeLookUp asymmetrically so looking down from a tilted phone still has full range
             const downScore = 0.5 * ((map.eyeLookDownLeft || 0) + (map.eyeLookDownRight || 0));
             const upScore = 0.5 * ((map.eyeLookUpLeft || 0) + (map.eyeLookUpRight || 0));
             bsY = downScore * 1.35 - upScore * 1.65;
@@ -757,87 +823,79 @@
             jawOpen = map.jawOpen || 0;
           }
 
-          // 2. Pixel-Space Aspect-Corrected Canthal + Eyelid Offsets
+          // 2. High-Res Native Video Eye-Crop Dark-Pupil Centroid
+          const cropR = extractHighResEyePatchCentroid(video, patchCtx, 0, c33, c133, lTop, lBot, w, h);
+          const cropL = extractHighResEyePatchCentroid(video, patchCtx, 1, c362, c263, rTop, rBot, w, h);
+          const cropU = -0.5 * (cropR.u + cropL.u);
+          const cropV = 0.5 * (cropR.v + cropL.v);
+
+          // 3. Canthal + Eyelid MediaPipe Features
           const offR = computePixelEyeFeatures(lIris, c33, c133, lTop, lBot, w, h);
           const offL = computePixelEyeFeatures(rIris, c362, c263, rTop, rBot, w, h);
-          const irisX = -0.5 * (offR.u + offL.u);
-          const irisY = 0.5 * (offR.v + offL.v);
+          const eyeU = -0.5 * (offR.u + offL.u) + bsX * 0.35;
+          const eyeV = 0.5 * (offR.v + offL.v) + bsY * 0.45;
 
-          // 3. True 3D Head Pitch & Yaw from MediaPipe's 4x4 PnP Transformation Matrix + Nose-to-Tragion Lever
+          // 4. True 3D Head Yaw & Pitch (in Degrees) from 4x4 PnP Matrix + Nose-to-Tragion Lever
           const ipdPx = Math.max(12.0, Math.hypot((lIris.x - rIris.x) * w, (lIris.y - rIris.y) * h));
           const eyeMidX_px = 0.25 * (c33.x + c133.x + c362.x + c263.x) * w;
           const tragionMidY_px = 0.5 * (leftEarTragion.y + rightEarTragion.y) * h;
-          const noseX_px = noseTip.x * w;
-          const noseY_px = noseTip.y * h;
+          const leverYawDeg = -((noseTip.x * w - eyeMidX_px) / ipdPx) * 35.0;
+          const leverPitchDeg = ((noseTip.y * h - tragionMidY_px) / ipdPx) * 42.0;
 
-          // Lever-arm ratios in pixel space normalized by horizontal IPD (never cancels out!)
-          const leverYaw = -(noseX_px - eyeMidX_px) / ipdPx;
-          const leverPitch = (noseY_px - tragionMidY_px) / ipdPx;
-
-          let pnpYawRad = leverYaw * 0.65;
-          let pnpPitchRad = leverPitch * 0.65;
+          let yawDeg = leverYawDeg;
+          let pitchDeg = leverPitchDeg;
           if (res.facialTransformationMatrixes && res.facialTransformationMatrixes.length > 0) {
             const m = res.facialTransformationMatrixes[0].data;
-            // Column-major 4x4 matrix: forward vector Z is (m[8], m[9], m[10])
-            const matYaw = -Math.atan2(m[8], Math.max(1e-4, Math.abs(m[10])));
-            const matPitch = -Math.asin(Math.max(-0.99, Math.min(0.99, m[9])));
-            pnpYawRad = 0.55 * matYaw + 0.45 * leverYaw;
-            pnpPitchRad = 0.55 * matPitch + 0.45 * leverPitch;
+            const matYawDeg = -Math.atan2(m[8], Math.max(1e-4, Math.abs(m[10]))) * (180 / Math.PI);
+            const matPitchDeg = -Math.asin(Math.max(-0.99, Math.min(0.99, m[9]))) * (180 / Math.PI);
+            yawDeg = 0.55 * matYawDeg + 0.45 * leverYawDeg;
+            pitchDeg = 0.55 * matPitchDeg + 0.45 * leverPitchDeg;
           }
-
-          const yawDeg = pnpYawRad * (180 / Math.PI);
-          const pitchDeg = pnpPitchRad * (180 / Math.PI);
-
-          // 4. Fuse Mobile Hardware IMU Pitch (if on phone)
-          const imuPitchContrib = hwImu.active ? (-hwImu.deltaPitch * 0.025) : 0;
-          const imuRollContrib = hwImu.active ? (hwImu.deltaRoll * 0.020) : 0;
 
           const focalPx = w * 0.88;
           const eyeZ_mm = Math.max(200, Math.min(900, (focalPx * 63.0) / ipdPx));
           const midX_px = ((lIris.x + rIris.x) * 0.5 - 0.5) * w;
           const midY_px = ((lIris.y + rIris.y) * 0.5 - 0.5) * h;
-          const eyeX_mm = -(midX_px * eyeZ_mm) / focalPx;
-          const eyeY_mm = -(midY_px * eyeZ_mm) / focalPx;
+          currentEyeFeatures.headX = Math.round(-(midX_px * eyeZ_mm) / focalPx);
+          currentEyeFeatures.headY = Math.round(-(midY_px * eyeZ_mm) / focalPx);
+          currentEyeFeatures.headZ = Math.round(eyeZ_mm);
 
-          // Blink Freeze Gate + Touch Tap Impulse Jerk Gate
-          const isBlinking = blinkScore > 0.38;
+          const isBlinking = blinkScore > 0.36;
           const inTapShock = nowMs < hwImu.tapShockUntilMs;
 
           if (!isBlinking && !inTapShock) {
-            let rawGx, rawGy;
-            if (gazeMode === 'hybrid') {
-              rawGx = irisX * 2.0 + bsX * 0.65 + pnpYawRad * 1.25 + imuRollContrib;
-              rawGy = irisY * 3.4 + bsY * 1.15 + pnpPitchRad * 1.95 + imuPitchContrib;
-            } else {
-              rawGx = irisX * 2.6 + bsX * 0.90 + pnpYawRad * 0.35;
-              rawGy = irisY * 4.5 + bsY * 1.50 + pnpPitchRad * 0.60;
-            }
-            currentEyeFeatures.gx = filterX.filter(rawGx, nowMs);
-            currentEyeFeatures.gy = filterY.filter(rawGy, nowMs);
-            currentEyeFeatures.yawDeg = yawDeg;
-            currentEyeFeatures.pitchDeg = pitchDeg;
-
+            currentFeatureVec = [eyeU, eyeV, cropU, cropV, yawDeg, pitchDeg];
             if (!centerBaseline) {
-              centerBaseline = { gx: currentEyeFeatures.gx, gy: currentEyeFeatures.gy };
+              centerBaseline = [...currentFeatureVec];
             }
 
-            if (isCollectingBurst) {
-              calibBurstBuffer.push({
-                gx: currentEyeFeatures.gx,
-                gy: currentEyeFeatures.gy
-              });
-              if (calibBurstBuffer.length >= 10) {
-                finishCalibBurstPoint();
+            // Hands-Free Auto-Dwell Calibration Sampler
+            if (calibStep >= 0 && calibStep < CALIB_KEYS_9.length) {
+              const elapsed = nowMs - calibPointStartMs;
+              const pct = Math.min(100, Math.round((elapsed / 1250) * 100));
+              document.getElementById('mobileCalibPct').innerText = pct + '%';
+              document.getElementById('mobileCalibBar').style.width = pct + '%';
+
+              // Wait 480ms for user's eyes to saccade & settle on the orange key, then collect 480..1250ms!
+              if (elapsed >= 480 && elapsed <= 1250) {
+                const k = CALIB_KEYS_9[calibStep];
+                const pt = keyCenters[k];
+                if (pt) {
+                  calibAllObs.push({
+                    f: [...currentFeatureVec],
+                    x: pt.x,
+                    y: pt.y,
+                    key: k
+                  });
+                }
+              } else if (elapsed > 1250) {
+                advanceAutoCalibStep(nowMs);
               }
             }
           }
 
-          currentEyeFeatures.headX = Math.round(eyeX_mm);
-          currentEyeFeatures.headY = Math.round(eyeY_mm);
-          currentEyeFeatures.headZ = Math.round(eyeZ_mm);
-
-          document.getElementById('liveIrisUV').innerText = `gx:${currentEyeFeatures.gx.toFixed(3)} | gy:${currentEyeFeatures.gy.toFixed(3)}`;
-          document.getElementById('liveHeadAngles').innerText = `Y:${yawDeg.toFixed(1)}° | P:${pitchDeg.toFixed(1)}°`;
+          document.getElementById('liveIrisUV').innerText = `u:${(eyeU + cropU).toFixed(2)} v:${(eyeV + cropV).toFixed(2)}`;
+          document.getElementById('liveHeadAngles').innerText = `Y:${yawDeg.toFixed(1)}° P:${pitchDeg.toFixed(1)}°`;
 
           const lipRatio = Math.hypot((uLip.x - lLip.x) * w, (uLip.y - lLip.y) * h) / ipdPx;
           const isMouthOpen = (jawOpen > 0.26) || (lipRatio > 0.22);
@@ -851,14 +909,15 @@
           }
           currentEyeFeatures.mouthOpen = isMouthOpen;
 
-          updateLiveGazeOnKeyboard();
+          updateLiveGazeOnKeyboard(nowMs);
           draw3DScene();
         }
       }
       requestAnimationFrame(processWebcamFrame);
     }
 
-    function start5PointCalibration() {
+    // --- HANDS-FREE 9-POINT AUTO-DWELL RIDGE REGRESSION CALIBRATION ---
+    function startAuto9PointCalibration() {
       measureKeyCoordinates();
       if (hwImu.active) {
         hwImu.baseAlpha = hwImu.alpha;
@@ -866,145 +925,195 @@
         hwImu.baseGamma = hwImu.gamma;
       }
       calibStep = 0;
-      calibSamples = [];
-      isCollectingBurst = false;
+      calibAllObs = [];
+      calibPointStartMs = performance.now();
       document.getElementById('mobileCalibBanner').classList.remove('hidden');
-      highlightCalibKey();
+      highlightAutoCalibKey();
     }
 
-    function highlightCalibKey() {
+    function highlightAutoCalibKey() {
       Object.values(keyElements).forEach(el => el.classList.remove('calib-target'));
-      if (calibStep >= 0 && calibStep < CALIB_KEYS.length) {
-        const k = CALIB_KEYS[calibStep];
+      if (calibStep >= 0 && calibStep < CALIB_KEYS_9.length) {
+        const k = CALIB_KEYS_9[calibStep];
         if (keyElements[k]) keyElements[k].classList.add('calib-target');
-        const rowHint = (k === 'Q' || k === 'P') ? 'TOP ROW — tilt/look UP slightly' : (k === 'G' ? 'MIDDLE ROW — look CENTER' : 'BOTTOM ROW — tilt/look DOWN slightly');
         document.getElementById('mobileCalibPrompt').innerText =
-          `Point ${calibStep + 1}/5 [${k}] (${rowHint})`;
-        document.getElementById('calibInstructionBox').innerHTML =
-          `<strong>Calibrating Point ${calibStep + 1} of 5 — Key [${k}] (${rowHint}):</strong> Look at <strong>[${k}]</strong> and tap <strong>"TAP TO RECORD POINT"</strong> (or tap <strong>[${k}]</strong> or press <strong>C / Spacebar</strong>).`;
+          `Point ${calibStep + 1}/9: JUST LOOK AT ORANGE KEY [${k}] (Hands-Free Auto-Capture)`;
       }
     }
 
-    function onKeyClickDuringCalib(ch) {
-      if (calibStep >= 0) {
-        triggerCalibBurst();
-      }
-    }
-
-    function triggerCalibBurst() {
-      if (calibStep < 0 || isCollectingBurst) return;
-      isCollectingBurst = true;
-      calibBurstBuffer = [];
-      const k = CALIB_KEYS[calibStep];
-      document.getElementById('mobileCalibPrompt').innerText = `Sampling [${k}] (10 frames)... Hold steady on [${k}]`;
-    }
-
-    function finishCalibBurstPoint() {
-      isCollectingBurst = false;
-      const k = CALIB_KEYS[calibStep];
-      const pt = keyCenters[k];
-      const sortedGx = calibBurstBuffer.map(s => s.gx).sort((a, b) => a - b);
-      const sortedGy = calibBurstBuffer.map(s => s.gy).sort((a, b) => a - b);
-      const mid = Math.floor(sortedGx.length / 2);
-
-      calibSamples.push({
-        gx: sortedGx[mid],
-        gy: sortedGy[mid],
-        x: pt.x,
-        y: pt.y,
-        key: k
-      });
-
+    function advanceAutoCalibStep(nowMs) {
       calibStep++;
-      if (calibStep < CALIB_KEYS.length) {
-        highlightCalibKey();
+      if (calibStep < CALIB_KEYS_9.length) {
+        calibPointStartMs = nowMs;
+        highlightAutoCalibKey();
       } else {
         calibStep = -1;
         document.getElementById('mobileCalibBanner').classList.add('hidden');
         Object.values(keyElements).forEach(el => el.classList.remove('calib-target'));
-        fitCalibModel();
+        fitStandardizedRidgeRegression();
       }
     }
 
-    function fitCalibModel() {
-      measureKeyCoordinates();
-      const gxs = calibSamples.map(s => s.gx);
-      const gys = calibSamples.map(s => s.gy);
-
-      // Q(0), P(1), G(2), Z(3), M(4)
-      const gxLeft = 0.5 * (calibSamples[0].gx + calibSamples[3].gx);
-      const gxRight = 0.5 * (calibSamples[1].gx + calibSamples[4].gx);
-      const xLeft = 0.5 * (calibSamples[0].x + calibSamples[3].x);
-      const xRight = 0.5 * (calibSamples[1].x + calibSamples[4].x);
-
-      const gyTop = 0.5 * (calibSamples[0].gy + calibSamples[1].gy);
-      const gyBot = 0.5 * (calibSamples[3].gy + calibSamples[4].gy);
-      const yTop = 0.5 * (calibSamples[0].y + calibSamples[1].y);
-      const yBot = 0.5 * (calibSamples[3].y + calibSamples[4].y);
-
-      // Signed spans (preserving user's natural vertical direction!) with safe minimum floor
-      let spanGx = gxRight - gxLeft;
-      if (Math.abs(spanGx) < 0.015) spanGx = (spanGx >= 0 ? 1 : -1) * Math.max(0.025, Math.max(...gxs) - Math.min(...gxs));
-
-      let spanGy = gyBot - gyTop;
-      if (Math.abs(spanGy) < 0.012) spanGy = (spanGy >= 0 ? 1 : -1) * Math.max(0.022, Math.max(...gys) - Math.min(...gys));
-
-      const topMidGx = 0.5 * (calibSamples[0].gx + calibSamples[1].gx);
-      const botMidGx = 0.5 * (calibSamples[3].gx + calibSamples[4].gx);
-      const shearXfromY = (botMidGx - topMidGx) / spanGy;
-
-      calibModel = {
-        gxCenter: calibSamples[2].gx,
-        gyCenter: calibSamples[2].gy,
-        xCenter: calibSamples[2].x,
-        yCenter: calibSamples[2].y,
-        spanGx,
-        spanX: xRight - xLeft,
-        spanGy,
-        spanY: yBot - yTop,
-        shearXfromY
-      };
-      centerBaseline = { gx: calibSamples[2].gx, gy: calibSamples[2].gy };
-
-      document.getElementById('calibInstructionBox').innerHTML =
-        `<strong class="text-emerald-800">5-Point Calibration Locked!</strong> (Δgx=${Math.abs(spanGx).toFixed(3)}, Δgy=${Math.abs(spanGy).toFixed(3)}). Look up/down to see the highlighted row switch between Row 1, Row 2, and Row 3. Adjust <strong>Vertical Gain (Y)</strong> above anytime!`;
+    // Solve 6-Feature Standardized L2 Ridge Regression: (Z^T Z + lambda I) w = Z^T y
+    // Never blows up on still-head features because Ridge shrinks zero-variance features to 0 weight!
+    function solveLinearSystem(A, b) {
+      const n = b.length;
+      const M = A.map((row, i) => [...row, b[i]]);
+      for (let col = 0; col < n; col++) {
+        let maxRow = col;
+        for (let r = col + 1; r < n; r++) {
+          if (Math.abs(M[r][col]) > Math.abs(M[maxRow][col])) maxRow = r;
+        }
+        [M[col], M[maxRow]] = [M[maxRow], M[col]];
+        const pivot = M[col][col] || 1e-8;
+        for (let c = col; c <= n; c++) M[col][c] /= pivot;
+        for (let r = 0; r < n; r++) {
+          if (r !== col) {
+            const factor = M[r][col];
+            for (let c = col; c <= n; c++) M[r][c] -= factor * M[col][c];
+          }
+        }
+      }
+      return M.map(row => row[n]);
     }
 
-    function updateLiveGazeOnKeyboard() {
+    function fitStandardizedRidgeRegression() {
+      if (calibAllObs.length < 18) return;
+      const N = calibAllObs.length;
+      const D = 6; // [eyeU, eyeV, cropU, cropV, yawDeg, pitchDeg]
+      const mean = new Array(D).fill(0);
+      const std = new Array(D).fill(0);
+
+      for (const obs of calibAllObs) {
+        for (let j = 0; j < D; j++) mean[j] += obs.f[j] / N;
+      }
+      for (const obs of calibAllObs) {
+        for (let j = 0; j < D; j++) {
+          const d = obs.f[j] - mean[j];
+          std[j] += (d * d) / N;
+        }
+      }
+      for (let j = 0; j < D; j++) {
+        std[j] = Math.max(1e-3, Math.sqrt(std[j]));
+      }
+
+      // Design matrix Z has D+1 columns (standardized features + 1.0 intercept)
+      const P = D + 1;
+      const ZtZ_x = Array.from({ length: P }, () => new Array(P).fill(0));
+      const ZtZ_y = Array.from({ length: P }, () => new Array(P).fill(0));
+      const Ztx = new Array(P).fill(0);
+      const Zty = new Array(P).fill(0);
+
+      for (const obs of calibAllObs) {
+        const z = new Array(P);
+        for (let j = 0; j < D; j++) z[j] = (obs.f[j] - mean[j]) / std[j];
+        z[D] = 1.0;
+        for (let r = 0; r < P; r++) {
+          Ztx[r] += z[r] * obs.x;
+          Zty[r] += z[r] * obs.y;
+          for (let c = 0; c < P; c++) {
+            ZtZ_x[r][c] += z[r] * z[c];
+            ZtZ_y[r][c] += z[r] * z[c];
+          }
+        }
+      }
+
+      // L2 Ridge Penalty (prevents noise amplification on low-variance features)
+      const lambda = 0.22 * N;
+      for (let j = 0; j < D; j++) {
+        ZtZ_x[j][j] += lambda;
+        ZtZ_y[j][j] += lambda;
+      }
+
+      const wx = solveLinearSystem(ZtZ_x, Ztx);
+      const wy = solveLinearSystem(ZtZ_y, Zty);
+
+      ridgeModel = { mean, std, wx, wy };
+
+      // Compute training RMSE in pixels
+      let errSq = 0;
+      for (const obs of calibAllObs) {
+        const pred = predictRidge(obs.f);
+        errSq += Math.hypot(pred.x - obs.x, pred.y - obs.y);
+      }
+      const maePx = Math.round(errSq / N);
+
+      // Find G sample to set centerBaseline
+      const gObs = calibAllObs.filter(o => o.key === 'G');
+      if (gObs.length > 0) centerBaseline = [...gObs[Math.floor(gObs.length / 2)].f];
+
+      document.getElementById('liveCalibQuality').innerText = `Locked (±${maePx}px)`;
+      document.getElementById('liveCalibQuality').className = 'font-bold text-emerald-600';
+      document.getElementById('calibInstructionBox').innerHTML =
+        `<strong class="text-emerald-800">9-Point Hands-Free Ridge Calibration Locked!</strong> (${N} frames captured, fit residual ±${maePx}px). You can also switch the dropdown above between <strong>Mode 1 (9-Pt Ridge)</strong>, <strong>Mode 2 (3D Head-Pose Laser)</strong>, and <strong>Mode 3 (Mobile IMU Tilt)</strong> to compare!`;
+    }
+
+    function predictRidge(fVec) {
+      if (!ridgeModel) return null;
+      const D = 6;
+      let px = ridgeModel.wx[D];
+      let py = ridgeModel.wy[D];
+      for (let j = 0; j < D; j++) {
+        const z = (fVec[j] - ridgeModel.mean[j]) / ridgeModel.std[j];
+        px += ridgeModel.wx[j] * z;
+        py += ridgeModel.wy[j] * z;
+      }
+      return { x: px, y: py };
+    }
+
+    function updateLiveGazeOnKeyboard(nowMs) {
       const canvas = document.getElementById('kbCanvas');
       if (!canvas) return;
-      let targetX, targetY;
       const gPt = keyCenters['G'] || { x: canvas.width * 0.5, y: canvas.height * 0.5 };
+      const base = centerBaseline || [0, 0, 0, 0, 0, 0];
 
-      if (calibModel) {
-        const dGy = (currentEyeFeatures.gy - calibModel.gyCenter) * vertGain;
-        const detrendedGx = (currentEyeFeatures.gx - calibModel.gxCenter) - calibModel.shearXfromY * (currentEyeFeatures.gy - calibModel.gyCenter) * 0.35;
-        targetX = calibModel.xCenter + (detrendedGx / calibModel.spanGx) * calibModel.spanX;
-        targetY = calibModel.yCenter + (dGy / calibModel.spanGy) * calibModel.spanY;
+      const dEyeU = (currentFeatureVec[0] - base[0]) + (currentFeatureVec[2] - base[2]) * 0.85;
+      const dEyeV = (currentFeatureVec[1] - base[1]) + (currentFeatureVec[3] - base[3]) * 0.85;
+      const dYawDeg = currentFeatureVec[4] - base[4];
+      const dPitchDeg = currentFeatureVec[5] - base[5];
+
+      let rawX = gPt.x, rawY = gPt.y;
+
+      if (gazeMode === 'ridge_fusion' && ridgeModel) {
+        const pred = predictRidge(currentFeatureVec);
+        rawX = gPt.x + (pred.x - gPt.x) * horizGain;
+        rawY = gPt.y + (pred.y - gPt.y) * vertGain;
+      } else if (gazeMode === 'head_laser') {
+        // Mode 2: 3D Head-Pose Laser Pointer (tracks whole-skull 3D orientation — zero pupil noise!)
+        // ±7° yaw spans full keyboard width; ±4.5° pitch spans all 3 rows
+        rawX = gPt.x + (dYawDeg / 7.0) * (canvas.width * 0.52) * horizGain;
+        rawY = gPt.y + (dPitchDeg / 4.5) * (canvas.height * 0.48) * vertGain;
+      } else if (gazeMode === 'imu_tilt') {
+        // Mode 3: Mobile Hardware Gyroscope Tilt + Eye Fine-Tuning
+        const tiltX = hwImu.active ? (hwImu.deltaRoll / 11.0) * (canvas.width * 0.52) : (dYawDeg / 7.5) * (canvas.width * 0.5);
+        const tiltY = hwImu.active ? (hwImu.deltaPitch / 8.0) * (canvas.height * 0.52) : (dPitchDeg / 5.0) * (canvas.height * 0.5);
+        rawX = gPt.x + (tiltX + dEyeU * canvas.width * 1.1) * horizGain;
+        rawY = gPt.y + (tiltY + dEyeV * canvas.height * 1.4) * vertGain;
       } else {
-        const baseGx = centerBaseline ? centerBaseline.gx : 0;
-        const baseGy = centerBaseline ? centerBaseline.gy : 0;
-        targetX = gPt.x + (currentEyeFeatures.gx - baseGx) * canvas.width * 2.8;
-        targetY = gPt.y + (currentEyeFeatures.gy - baseGy) * vertGain * canvas.height * 3.8;
+        // Mode 4 (or uncalibrated fallback): Pure Eye + Subtle Pose
+        const poseAssistX = gazeMode === 'pure_eye' ? 0.0 : (dYawDeg / 10.0) * (canvas.width * 0.35);
+        const poseAssistY = gazeMode === 'pure_eye' ? 0.0 : (dPitchDeg / 6.5) * (canvas.height * 0.38);
+        rawX = gPt.x + (dEyeU * canvas.width * 2.9 + poseAssistX) * horizGain;
+        rawY = gPt.y + (dEyeV * canvas.height * 3.8 + poseAssistY) * vertGain;
       }
 
-      // Apply either real Hardware IMU drift (if uncompensated) or synthetic sliders
+      // Add synthetic disturbance if testing Raw or Basic
       let offsetX = 0, offsetY = 0;
-      const imuDriftX = hwImu.active ? hwImu.deltaRoll * 4.5 : 0;
-      const imuDriftY = hwImu.active ? hwImu.deltaPitch * 4.5 : 0;
-
       if (solverMode === 'uncompensated') {
-        offsetX = (phoneShift.x + headShift.x + yawDriftDeg * 6.5) * 1.5 + imuDriftX;
-        offsetY = (phoneShift.y + headShift.y) * 1.5 + imuDriftY;
+        offsetX = (phoneShift.x + headShift.x + yawDriftDeg * 6.5) * 1.5;
+        offsetY = (phoneShift.y + headShift.y) * 1.5;
       } else if (solverMode === 'rev1') {
         offsetX = (headShift.x + yawDriftDeg * 3.8) * 1.3;
         offsetY = headShift.y * 1.3;
       }
 
-      targetX = Math.max(14, Math.min(canvas.width - 14, targetX + offsetX));
-      targetY = Math.max(14, Math.min(canvas.height - 14, targetY + offsetY));
+      rawX = Math.max(14, Math.min(canvas.width - 14, rawX + offsetX));
+      rawY = Math.max(14, Math.min(canvas.height - 14, rawY + offsetY));
 
-      // Magnetic 3-Row Vertical Snap (snaps vertical coordinate toward Row 1, Row 2, or Row 3 center)
+      let targetX = filterScreenX.filter(rawX, nowMs);
+      let targetY = filterScreenY.filter(rawY, nowMs);
+
+      // Magnetic 3-Row Vertical Snap
       let activeRowIdx = 1;
       if (rowYCenters.length === 3) {
         let bestR = 0, bestDist = 1e9;
@@ -1014,11 +1123,10 @@
         }
         activeRowIdx = bestR;
         if (document.getElementById('chkRowSnap').checked) {
-          targetY = targetY * 0.42 + rowYCenters[bestR] * 0.58;
+          targetY = targetY * 0.45 + rowYCenters[bestR] * 0.55;
         }
       }
 
-      // Highlight active row container
       const rowNames = ['ROW 1 (TOP Q–P)', 'ROW 2 (HOME A–L)', 'ROW 3 (BOTTOM Z–M)'];
       document.getElementById('liveActiveRow').innerText = rowNames[activeRowIdx];
       ['row1', 'row2', 'row3'].forEach((rId, idx) => {
@@ -1028,8 +1136,8 @@
         else el.classList.remove('row-active-indicator');
       });
 
-      smoothedGazePt.x = smoothedGazePt.x * 0.58 + targetX * 0.42;
-      smoothedGazePt.y = smoothedGazePt.y * 0.55 + targetY * 0.45;
+      smoothedGazePt.x = targetX;
+      smoothedGazePt.y = targetY;
 
       let nearestKey = null, minDist = 1e9;
       for (const ch in keyCenters) {
@@ -1047,7 +1155,7 @@
             keyElements[ch].classList.remove('active-target');
           }
         }
-        document.getElementById('hoveredKeyBadge').innerText = nearestKey ? `Gaze Target: [${nearestKey}] (${rowNames[activeRowIdx].split(' ')[0]} ${rowNames[activeRowIdx].split(' ')[1]})` : 'Gaze Target: -';
+        document.getElementById('hoveredKeyBadge').innerText = nearestKey ? `Gaze Target: [${nearestKey}]` : 'Gaze Target: -';
       }
 
       if (isClutchActive) {
@@ -1197,10 +1305,7 @@
 
     function onClutchDown(e) {
       if (e) e.preventDefault();
-      if (calibStep >= 0) {
-        triggerCalibBurst();
-        return;
-      }
+      if (calibStep >= 0) return;
       startClutch(e);
     }
 
@@ -1229,11 +1334,6 @@
 
     window.addEventListener('keydown', (e) => {
       if (document.getElementById('view-studio').offsetParent === null) return;
-      if (calibStep >= 0 && (e.code === 'Space' || e.code === 'KeyC' || e.code === 'Enter')) {
-        e.preventDefault();
-        triggerCalibBurst();
-        return;
-      }
       if (e.code === 'Space' && calibStep === -1) {
         e.preventDefault();
         if (!isClutchActive) {
@@ -1325,7 +1425,6 @@
       }
     }
 
-    // Anisotropic Sim(2) Trajectory Decoder (weights high-SNR horizontal X 2.5x stronger than vertical Y!)
     function rankSim2Candidates(obs) {
       if (obs.length < 4) return [{ word: "HELLO", score: 0 }, { word: "WORLD", score: 1 }, { word: "TYPE", score: 2 }];
       const cx = obs.reduce((s, p) => s + p.x, 0) / obs.length;
@@ -1375,9 +1474,6 @@
       document.getElementById('diagLambda').innerText = isCollinear
         ? (solverMode === 'rev2' ? '0.002 → Gated OK' : '0.002 (ILL-COND!)')
         : '0.44 (Full Rank)';
-      document.getElementById('diagYaw').innerText = solverMode === 'rev2'
-        ? 'Active (6-DoF)'
-        : 'Ignored';
 
       if (solverMode === 'uncompensated' && (Math.hypot(phoneShift.x, phoneShift.y) > 15 || Math.hypot(headShift.x, headShift.y) > 15 || Math.abs(yawDriftDeg) > 2)) {
         document.getElementById('diagCand').innerText = 'MISS (OFFSET)';
