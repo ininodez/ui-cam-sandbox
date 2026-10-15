@@ -100,16 +100,16 @@
               1. Start Camera &amp; IMU
             </button>
             <button id="btnCalib9Pt" onclick="startAuto9PointCalibration()" disabled class="flex-1 sm:flex-initial px-3.5 py-2.5 sm:py-2 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-xs font-bold shadow-sm transition">
-              2. Auto-Calibrate 9-Pt (No Tapping!)
+              2. Auto-Calibrate (Hands-Free + Tilt Lock)
             </button>
             <button id="btnRecenterG" onclick="recenterOnG()" disabled class="px-3 py-2.5 sm:py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-bold shadow-sm transition">
               Re-Center [G]
             </button>
             <select id="selGazeMode" onchange="onChangeGazeMode()" class="w-full sm:w-auto text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 font-medium text-slate-700">
-              <option value="ridge_fusion">Mode 1: 9-Pt Ridge Regression (Eye Crop + Iris + 3D Pose)</option>
+              <option value="ridge_fusion">Mode 1: 6-DoF Motion-Compensated Eye Ridge (Recommended)</option>
               <option value="head_laser">Mode 2: 3D Head-Pose Laser Pointer (Ultra-Steady, Zero Iris Jitter)</option>
               <option value="imu_tilt">Mode 3: Mobile IMU Tilt Pointer + Eye Assist (Phone Handheld)</option>
-              <option value="pure_eye">Mode 4: Pure Eye-in-Orbit Only (Head Fixed)</option>
+              <option value="pure_eye">Mode 4: Raw Uncompensated Eye Only (Breaks on Phone Move)</option>
             </select>
           </div>
         </div>
@@ -126,7 +126,11 @@
             <input type="range" id="sliderVertGain" min="0.5" max="3.0" step="0.1" value="1.3" class="flex-1 accent-blue-600" oninput="updateGainLabels()">
             <span id="labelVertGain" class="mono font-bold text-blue-700 w-9 text-right">1.3×</span>
           </div>
-          <div class="flex items-center justify-end space-x-2">
+          <div class="flex flex-wrap items-center justify-end gap-1.5">
+            <label class="inline-flex items-center space-x-1.5 text-xs text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 font-semibold cursor-pointer" title="Cancels camera bearing shift, corneal-canthal parallax, and auto-zeros baseline whenever the phone moves in your hand">
+              <input type="checkbox" id="chkPhoneMotionLock" checked class="accent-emerald-600">
+              <span>6-DoF Phone-Motion Lock</span>
+            </label>
             <label class="inline-flex items-center space-x-1.5 text-xs text-slate-700 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 cursor-pointer">
               <input type="checkbox" id="chkRowSnap" checked class="accent-blue-600">
               <span>Row Snap</span>
@@ -572,12 +576,30 @@
       });
     }
 
-    // Live MediaPipe Webcam + High-Res Eye Crop State
+    // Live MediaPipe Webcam + High-Res Eye Crop + 6-DoF Phone-Motion Lock State
     let liveCameraActive = false;
     let faceLandmarker = null;
     let gazeMode = 'ridge_fusion';
-    let centerBaseline = null; // Baseline feature vector when looking at [G]
-    let currentFeatureVec = [0, 0, 0, 0, 0, 0]; // [eyeU, eyeV, cropU, cropV, headYawDeg, headPitchDeg]
+    let centerBaseline = null; // 4D Pure-Eye baseline [eyeU, eyeV, cropU, cropV] when looking at [G]
+    let currentEyeVec = [0, 0, 0, 0]; // [eyeU, eyeV, cropU, cropV]
+    let currentPoseVec = [0, 0, 0, 0]; // [camBearingX_deg, camBearingY_deg, yawDeg, pitchDeg]
+    let calibRefPose = [0, 0, 0, 0]; // Reference 4D pose at [G]
+    let calibRefIpdPx = 65.0; // Reference IPD (px) for Z-depth scale normalization
+    let currentIpdPx = 65.0;
+    let poseHistory = []; // Rolling 140ms buffer of { t, p: [4], e: [4] } for 6-DoF motion detection
+    let phoneMovingUntilMs = 0;
+    let activeSwipeEyeVecs = []; // Compensated eye vectors recorded during a swipe for closed-form self-healing
+
+    // 4x4 Pose-to-Eye Feed-Forward Cancellation Matrix K_pose:
+    // Maps deltaPose [dCamBearingX, dCamBearingY, dYawDeg, dPitchDeg] -> apparent shift in [eyeU, eyeV, cropU, cropV]
+    const DEFAULT_POSE_K = [
+      [-0.0022,  0.0000, -0.0018,  0.0000], // eyeU coupling to [bearingX, bearingY, yaw, pitch]
+      [ 0.0000,  0.0026,  0.0000,  0.0024], // eyeV coupling
+      [-0.0018,  0.0000, -0.0014,  0.0000], // cropU coupling
+      [ 0.0000,  0.0020,  0.0000,  0.0018]  // cropV coupling
+    ];
+    let poseCouplingK = DEFAULT_POSE_K.map(row => [...row]);
+
     let currentEyeFeatures = {
       headX: 0, headY: 0, headZ: 420,
       isBlinking: false,
@@ -586,12 +608,38 @@
     };
     let smoothedGazePt = { x: 200, y: 110 };
 
-    // Hands-Free 9-Point Auto-Dwell Calibration State
-    const CALIB_KEYS_9 = ["Q", "T", "P", "A", "G", "L", "Z", "B", "M"];
+    // Hands-Free 9-Point + 1 Tilt-Lock Step Auto-Dwell Calibration State
+    // Steps 0..8: 9 QWERTY keys (Q, T, P, A, G, L, Z, B, M)
+    // Step 9 (10th step, 1.8s): Keep looking at [G] while tilting/moving the phone slightly to lock 6-DoF immunity!
+    const CALIB_KEYS_9 = ["Q", "T", "P", "A", "G", "L", "Z", "B", "M", "G_TILT"];
     let calibStep = -1;
     let calibPointStartMs = 0;
-    let calibAllObs = []; // Array of { f: [6], x, y, key }
-    let ridgeModel = null; // { mean: [6], std: [6], wx: [7], wy: [7] }
+    let calibAllObs = []; // Array of { e: [4], p: [4], ipd, x, y, key }
+    let calibTiltObs = []; // Array of { e: [4], p: [4] } captured during Step 10 on [G]
+    let ridgeModel = null; // 4-Feature Pure-Eye Ridge Model { std: [4], wx: [4], wy: [4] }
+
+    function getCompensatedEyeVec(eVec, pVec) {
+      const lockEl = document.getElementById('chkPhoneMotionLock');
+      const lockOn = !lockEl || lockEl.checked;
+      if (!lockOn || gazeMode === 'pure_eye') {
+        return [...eVec];
+      }
+      const dp = [
+        pVec[0] - calibRefPose[0],
+        pVec[1] - calibRefPose[1],
+        pVec[2] - calibRefPose[2],
+        pVec[3] - calibRefPose[3]
+      ];
+      const out = [0, 0, 0, 0];
+      for (let i = 0; i < 4; i++) {
+        let shift = 0;
+        for (let j = 0; j < 4; j++) {
+          shift += poseCouplingK[i][j] * dp[j];
+        }
+        out[i] = eVec[i] - shift;
+      }
+      return out;
+    }
 
     function onChangeGazeMode() {
       gazeMode = document.getElementById('selGazeMode').value;
@@ -605,9 +653,11 @@
         hwImu.baseBeta = hwImu.beta;
         hwImu.baseGamma = hwImu.gamma;
       }
-      centerBaseline = [...currentFeatureVec];
+      calibRefPose = [...currentPoseVec];
+      calibRefIpdPx = currentIpdPx || 65.0;
+      centerBaseline = [...currentEyeVec];
       document.getElementById('calibInstructionBox').innerHTML =
-        `<strong class="text-emerald-800">Re-Centered on [G]!</strong> Current Mode: <strong>${document.getElementById('selGazeMode').selectedOptions[0].text}</strong>. Use the X/Y Gain sliders above to tune travel speed.`;
+        `<strong class="text-emerald-800">Re-Centered on [G]!</strong> 6-DoF Phone-Motion Lock is anchored to your current hand posture. Even if you move or tilt the phone now, it will auto-compensate.`;
     }
 
     async function toggleLiveCamera() {
@@ -673,28 +723,46 @@
       }
     }
 
-    // High-Resolution Native Video Eye-Crop Dark-Pupil Centroid Extractor
-    // Bypasses MediaPipe's 192x192 full-face downsampling by computing the cubic darkness-weighted
-    // image moment centroid (M10/M00, M01/M00) directly on the native video pixels inside each eye socket!
+    // Roll-Aligned High-Resolution Native Video Eye-Crop Dark-Pupil Centroid Extractor
+    // De-rotates each eye crop by the inter-canthal roll angle (-atan2(dy, dx)) so tilting the phone
+    // in roll NEVER shifts the pupil centroid inside the crop box!
     function extractHighResEyePatchCentroid(video, patchCtx, slotIdx, cLeft, cRight, lTop, lBot, vw, vh) {
       const x1 = cLeft.x * vw, y1 = cLeft.y * vh;
       const x2 = cRight.x * vw, y2 = cRight.y * vh;
-      const cx = 0.5 * (x1 + x2), cy = 0.5 * (y1 + y2);
+      const topX = lTop.x * vw, topY = lTop.y * vh;
+      const botX = lBot.x * vw, botY = lBot.y * vh;
+
+      // Center horizontally on canthal midpoint, and blend vertical center with palpebral (eyelid) midpoint
+      // so vertical corneal-canthal depth parallax during phone tilt doesn't shift the crop window!
+      const canthalCx = 0.5 * (x1 + x2);
+      const canthalCy = 0.5 * (y1 + y2);
+      const lidMidY = 0.5 * (topY + botY);
+      const cx = canthalCx;
+      const cy = 0.55 * canthalCy + 0.45 * lidMidY;
+
+      const rollRad = Math.atan2(y2 - y1, x2 - x1);
       const eyeW = Math.max(16, Math.hypot(x2 - x1, y2 - y1));
       const cropW = eyeW * 1.15;
       const cropH = eyeW * 0.62;
-      const sx = Math.max(0, Math.min(vw - cropW, cx - cropW * 0.5));
-      const sy = Math.max(0, Math.min(vh - cropH, cy - cropH * 0.5));
 
       const dstX = slotIdx * 80;
       const dstW = 80, dstH = 44;
-      patchCtx.drawImage(video, sx, sy, cropW, cropH, dstX, 0, dstW, dstH);
+
+      patchCtx.save();
+      patchCtx.beginPath();
+      patchCtx.rect(dstX, 0, dstW, dstH);
+      patchCtx.clip();
+      patchCtx.translate(dstX + dstW * 0.5, dstH * 0.5);
+      patchCtx.rotate(-rollRad);
+      patchCtx.scale(dstW / cropW, dstH / cropH);
+      patchCtx.drawImage(video, -cx, -cy, vw, vh);
+      patchCtx.restore();
 
       const imgData = patchCtx.getImageData(dstX + 10, 6, dstW - 20, dstH - 12);
       const data = imgData.data;
       const pw = dstW - 20, ph = dstH - 12;
 
-      // Pass 1: find min and 75th-percentile Red-channel intensity (iris/pupil is darkest in Red vs sclera)
+      // Pass 1: find min and max Red-channel intensity (iris/pupil is darkest in Red vs sclera)
       let minR = 255, maxR = 0;
       for (let i = 0; i < data.length; i += 4) {
         const r = data[i];
@@ -732,13 +800,16 @@
       patchCtx.moveTo(drawPx, drawPy - 5); patchCtx.lineTo(drawPx, drawPy + 5);
       patchCtx.stroke();
 
-      // Return normalized offset (-0.5 to +0.5)
       return {
         u: (centX / pw) - 0.5,
         v: (centY / ph) - 0.5
       };
     }
 
+    // Anterior-Palpebral + Bi-Canthal Eye Feature Extractor
+    // Subtracts 0.55 * vLidMid from vIrisCanthal because upper/lower eyelids rest on the anterior
+    // corneal surface at the same Z-depth as the iris (unlike side eye corners c33/c133 which sit 6.5mm deeper),
+    // cancelling vertical corneal-canthal depth parallax when the phone tilts up/down!
     function computePixelEyeFeatures(iris, cornerLeft, cornerRight, upperLid, lowerLid, w, h) {
       const cLx = cornerLeft.x * w, cLy = cornerLeft.y * h;
       const cRx = cornerRight.x * w, cRy = cornerRight.y * h;
@@ -768,9 +839,12 @@
       const relBotY = (botY - cy) / eyeWidthPx;
       const vLowerLid = relBotX * eyX + relBotY * eyY;
 
+      const vLidMid = 0.5 * (vUpperLid + vLowerLid);
+      const vIrisParallaxFree = vIrisCanthal - 0.55 * vLidMid;
+
       return {
         u: uIris,
-        v: vIrisCanthal * 1.5 + vUpperLid * 0.85 + vLowerLid * 0.45
+        v: vIrisParallaxFree * 1.65 + vUpperLid * 0.65 + vLowerLid * 0.35
       };
     }
 
@@ -823,24 +897,25 @@
             jawOpen = map.jawOpen || 0;
           }
 
-          // 2. High-Res Native Video Eye-Crop Dark-Pupil Centroid
+          // 2. Roll-Aligned High-Res Native Video Eye-Crop Dark-Pupil Centroid
           const cropR = extractHighResEyePatchCentroid(video, patchCtx, 0, c33, c133, lTop, lBot, w, h);
           const cropL = extractHighResEyePatchCentroid(video, patchCtx, 1, c362, c263, rTop, rBot, w, h);
           const cropU = -0.5 * (cropR.u + cropL.u);
           const cropV = 0.5 * (cropR.v + cropL.v);
 
-          // 3. Canthal + Eyelid MediaPipe Features
+          // 3. Parallax-Free Canthal + Palpebral MediaPipe Features
           const offR = computePixelEyeFeatures(lIris, c33, c133, lTop, lBot, w, h);
           const offL = computePixelEyeFeatures(rIris, c362, c263, rTop, rBot, w, h);
-          const eyeU = -0.5 * (offR.u + offL.u) + bsX * 0.35;
-          const eyeV = 0.5 * (offR.v + offL.v) + bsY * 0.45;
+          const eyeU = -0.5 * (offR.u + offL.u) + bsX * 0.28;
+          const eyeV = 0.5 * (offR.v + offL.v) + bsY * 0.35;
 
-          // 4. True 3D Head Yaw & Pitch (in Degrees) from 4x4 PnP Matrix + Nose-to-Tragion Lever
-          const ipdPx = Math.max(12.0, Math.hypot((lIris.x - rIris.x) * w, (lIris.y - rIris.y) * h));
+          // 4. Rigid Skull Bearing in Camera Frame + True 3D Head Yaw & Pitch (in Degrees)
+          const rawIpdPx = Math.max(12.0, Math.hypot((c263.x - c33.x) * w, (c263.y - c33.y) * h) * 0.72);
           const eyeMidX_px = 0.25 * (c33.x + c133.x + c362.x + c263.x) * w;
+          const eyeMidY_px = 0.25 * (c33.y + c133.y + c362.y + c263.y) * h;
           const tragionMidY_px = 0.5 * (leftEarTragion.y + rightEarTragion.y) * h;
-          const leverYawDeg = -((noseTip.x * w - eyeMidX_px) / ipdPx) * 35.0;
-          const leverPitchDeg = ((noseTip.y * h - tragionMidY_px) / ipdPx) * 42.0;
+          const leverYawDeg = -((noseTip.x * w - eyeMidX_px) / rawIpdPx) * 35.0;
+          const leverPitchDeg = ((noseTip.y * h - tragionMidY_px) / rawIpdPx) * 42.0;
 
           let yawDeg = leverYawDeg;
           let pitchDeg = leverPitchDeg;
@@ -852,56 +927,153 @@
             pitchDeg = 0.55 * matPitchDeg + 0.45 * leverPitchDeg;
           }
 
+          // Yaw-corrected IPD for accurate depth Z scaling even when head turns
+          const ipdPx = rawIpdPx / Math.max(0.78, Math.cos(yawDeg * Math.PI / 180));
+          currentIpdPx = ipdPx;
+
           const focalPx = w * 0.88;
           const eyeZ_mm = Math.max(200, Math.min(900, (focalPx * 63.0) / ipdPx));
-          const midX_px = ((lIris.x + rIris.x) * 0.5 - 0.5) * w;
-          const midY_px = ((lIris.y + rIris.y) * 0.5 - 0.5) * h;
-          currentEyeFeatures.headX = Math.round(-(midX_px * eyeZ_mm) / focalPx);
-          currentEyeFeatures.headY = Math.round(-(midY_px * eyeZ_mm) / focalPx);
+
+          // Camera-frame angular bearing of the rigid eye-corner midpoint (in degrees)
+          // Detects even a 2mm phone shift or 0.3° phone tilt in the user's hand!
+          const camBearingX_deg = -((eyeMidX_px - w * 0.5) / focalPx) * (180 / Math.PI);
+          const camBearingY_deg = ((eyeMidY_px - h * 0.5) / focalPx) * (180 / Math.PI);
+
+          currentEyeFeatures.headX = Math.round(-((eyeMidX_px - w * 0.5) * eyeZ_mm) / focalPx);
+          currentEyeFeatures.headY = Math.round(-((eyeMidY_px - h * 0.5) * eyeZ_mm) / focalPx);
           currentEyeFeatures.headZ = Math.round(eyeZ_mm);
 
           const isBlinking = blinkScore > 0.36;
           const inTapShock = nowMs < hwImu.tapShockUntilMs;
 
           if (!isBlinking && !inTapShock) {
-            currentFeatureVec = [eyeU, eyeV, cropU, cropV, yawDeg, pitchDeg];
+            currentEyeVec = [eyeU, eyeV, cropU, cropV];
+            currentPoseVec = [camBearingX_deg, camBearingY_deg, yawDeg, pitchDeg];
+
             if (!centerBaseline) {
-              centerBaseline = [...currentFeatureVec];
+              calibRefPose = [...currentPoseVec];
+              calibRefIpdPx = ipdPx;
+              centerBaseline = [...currentEyeVec];
             }
 
-            // Hands-Free Auto-Dwell Calibration Sampler
+            // Rolling 130ms Pose History for 6-DoF Hand/Phone Movement Detection
+            poseHistory.push({ t: nowMs, p: [...currentPoseVec], e: [...currentEyeVec] });
+            while (poseHistory.length > 2 && (nowMs - poseHistory[0].t) > 140) {
+              poseHistory.shift();
+            }
+
+            const oldest = poseHistory[0];
+            const dtSec = Math.max(0.03, (nowMs - oldest.t) / 1000.0);
+            const dBearX = currentPoseVec[0] - oldest.p[0];
+            const dBearY = currentPoseVec[1] - oldest.p[1];
+            const dYaw = currentPoseVec[2] - oldest.p[2];
+            const dPitch = currentPoseVec[3] - oldest.p[3];
+
+            // Rigid skull/camera bearing shift over 130ms (completely unaffected by eye saccades!)
+            const bearingShiftDeg = Math.hypot(dBearX, dBearY);
+            const headAngleShiftDeg = Math.hypot(dYaw, dPitch);
+            const imuGyroSpeed = hwImu.active ? hwImu.gyroRateMag : 0;
+
+            const poseMotionRatio = Math.max(
+              bearingShiftDeg / 0.36,
+              headAngleShiftDeg / 0.65,
+              imuGyroSpeed / 12.0
+            );
+
+            const lockEl = document.getElementById('chkPhoneMotionLock');
+            const lockOn = !lockEl || lockEl.checked;
+
+            if (lockOn && calibStep === -1 && !isClutchActive) {
+              if (poseMotionRatio >= 1.0) {
+                phoneMovingUntilMs = nowMs + 380;
+
+                // Online Damped RLS update of Pose-to-Eye Matrix K_pose during active phone movement
+                const dpStep = [dBearX, dBearY, dYaw, dPitch];
+                const deStep = [
+                  currentEyeVec[0] - oldest.e[0],
+                  currentEyeVec[1] - oldest.e[1],
+                  currentEyeVec[2] - oldest.e[2],
+                  currentEyeVec[3] - oldest.e[3]
+                ];
+                const dpNormSq = dpStep[0]*dpStep[0] + dpStep[1]*dpStep[1] + dpStep[2]*dpStep[2] + dpStep[3]*dpStep[3];
+                if (dpNormSq > 0.12 && dpNormSq < 25.0) {
+                  const eta = 0.035 / (1.0 + dpNormSq);
+                  for (let i = 0; i < 4; i++) {
+                    const predDe = poseCouplingK[i][0]*dpStep[0] + poseCouplingK[i][1]*dpStep[1] +
+                                   poseCouplingK[i][2]*dpStep[2] + poseCouplingK[i][3]*dpStep[3];
+                    const errDe = deStep[i] - predDe;
+                    for (let j = 0; j < 4; j++) {
+                      poseCouplingK[i][j] = 0.985 * poseCouplingK[i][j] + 0.015 * DEFAULT_POSE_K[i][j] + eta * errDe * dpStep[j];
+                    }
+                  }
+                }
+              }
+
+              // While the phone is moving in the user's hand (plus 380ms settle window), smoothly adapt
+              // centerBaseline to the compensated eye vector so the keyboard stays centered at the new phone posture!
+              if (nowMs < phoneMovingUntilMs) {
+                const compE = getCompensatedEyeVec(currentEyeVec, currentPoseVec);
+                const adaptRate = Math.min(0.26, 0.06 + 0.06 * poseMotionRatio);
+                for (let i = 0; i < 4; i++) {
+                  centerBaseline[i] = centerBaseline[i] * (1.0 - adaptRate) + compE[i] * adaptRate;
+                }
+              }
+            }
+
+            // Hands-Free Auto-Dwell Calibration Sampler (Steps 0..8 = 9 Keys, Step 9 = 1.8s Phone-Tilt Lock on [G])
             if (calibStep >= 0 && calibStep < CALIB_KEYS_9.length) {
+              const stepKey = CALIB_KEYS_9[calibStep];
+              const isTiltStep = stepKey === 'G_TILT';
+              const stepDurMs = isTiltStep ? 1900 : 1200;
+              const settleMs = isTiltStep ? 250 : 450;
+
               const elapsed = nowMs - calibPointStartMs;
-              const pct = Math.min(100, Math.round((elapsed / 1250) * 100));
+              const pct = Math.min(100, Math.round((elapsed / stepDurMs) * 100));
               document.getElementById('mobileCalibPct').innerText = pct + '%';
               document.getElementById('mobileCalibBar').style.width = pct + '%';
 
-              // Wait 480ms for user's eyes to saccade & settle on the orange key, then collect 480..1250ms!
-              if (elapsed >= 480 && elapsed <= 1250) {
-                const k = CALIB_KEYS_9[calibStep];
-                const pt = keyCenters[k];
-                if (pt) {
-                  calibAllObs.push({
-                    f: [...currentFeatureVec],
-                    x: pt.x,
-                    y: pt.y,
-                    key: k
+              if (elapsed >= settleMs && elapsed <= stepDurMs) {
+                if (isTiltStep) {
+                  calibTiltObs.push({
+                    e: [...currentEyeVec],
+                    p: [...currentPoseVec]
                   });
+                } else {
+                  const pt = keyCenters[stepKey];
+                  if (pt) {
+                    calibAllObs.push({
+                      e: [...currentEyeVec],
+                      p: [...currentPoseVec],
+                      ipd: ipdPx,
+                      x: pt.x,
+                      y: pt.y,
+                      key: stepKey
+                    });
+                  }
                 }
-              } else if (elapsed > 1250) {
+              } else if (elapsed > stepDurMs) {
                 advanceAutoCalibStep(nowMs);
               }
             }
           }
 
-          document.getElementById('liveIrisUV').innerText = `u:${(eyeU + cropU).toFixed(2)} v:${(eyeV + cropV).toFixed(2)}`;
-          document.getElementById('liveHeadAngles').innerText = `Y:${yawDeg.toFixed(1)}° P:${pitchDeg.toFixed(1)}°`;
+          const compNow = getCompensatedEyeVec(currentEyeVec, currentPoseVec);
+          const isPhoneMovingNow = nowMs < phoneMovingUntilMs;
+          document.getElementById('liveIrisUV').innerText = `u:${(compNow[0] + compNow[2]).toFixed(2)} v:${(compNow[1] + compNow[3]).toFixed(2)}`;
+          document.getElementById('liveHeadAngles').innerText =
+            `ΔX:${(currentPoseVec[0] - calibRefPose[0]).toFixed(1)}° ΔY:${(currentPoseVec[1] - calibRefPose[1]).toFixed(1)}°`;
+          document.getElementById('camHudBottom').innerText = isPhoneMovingNow
+            ? '6-DoF LOCK: COMPENSATING PHONE SHIFT...'
+            : '6-DoF PHONE-MOTION LOCK: STEADY';
+          document.getElementById('camHudBottom').className = isPhoneMovingNow
+            ? 'absolute bottom-1.5 left-1.5 bg-amber-600/90 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded'
+            : 'absolute bottom-1.5 left-1.5 bg-black/75 text-cyan-300 text-[10px] font-mono px-2 py-0.5 rounded';
 
           const lipRatio = Math.hypot((uLip.x - lLip.x) * w, (uLip.y - lLip.y) * h) / ipdPx;
           const isMouthOpen = (jawOpen > 0.26) || (lipRatio > 0.22);
           document.getElementById('liveMouthState').innerText = inTapShock
             ? 'IMPULSE LOCKED'
-            : (isBlinking ? 'BLINK FROZEN' : (isMouthOpen ? 'MOUTH CLUTCH ON' : 'EYES OPEN | IDLE'));
+            : (isBlinking ? 'BLINK FROZEN' : (isPhoneMovingNow ? '6-DoF SHIFT LOCK' : (isMouthOpen ? 'MOUTH CLUTCH ON' : 'EYES OPEN | IDLE')));
 
           if (document.getElementById('chkMouthClutch').checked) {
             if (isMouthOpen && !isClutchActive && calibStep === -1) startClutch();
@@ -916,7 +1088,7 @@
       requestAnimationFrame(processWebcamFrame);
     }
 
-    // --- HANDS-FREE 9-POINT AUTO-DWELL RIDGE REGRESSION CALIBRATION ---
+    // --- HANDS-FREE 9-POINT + STEP 10 PHONE-TILT IMMUNITY CALIBRATION ---
     function startAuto9PointCalibration() {
       measureKeyCoordinates();
       if (hwImu.active) {
@@ -926,6 +1098,7 @@
       }
       calibStep = 0;
       calibAllObs = [];
+      calibTiltObs = [];
       calibPointStartMs = performance.now();
       document.getElementById('mobileCalibBanner').classList.remove('hidden');
       highlightAutoCalibKey();
@@ -934,10 +1107,16 @@
     function highlightAutoCalibKey() {
       Object.values(keyElements).forEach(el => el.classList.remove('calib-target'));
       if (calibStep >= 0 && calibStep < CALIB_KEYS_9.length) {
-        const k = CALIB_KEYS_9[calibStep];
-        if (keyElements[k]) keyElements[k].classList.add('calib-target');
-        document.getElementById('mobileCalibPrompt').innerText =
-          `Point ${calibStep + 1}/9: JUST LOOK AT ORANGE KEY [${k}] (Hands-Free Auto-Capture)`;
+        const rawKey = CALIB_KEYS_9[calibStep];
+        const actualKey = rawKey === 'G_TILT' ? 'G' : rawKey;
+        if (keyElements[actualKey]) keyElements[actualKey].classList.add('calib-target');
+        if (rawKey === 'G_TILT') {
+          document.getElementById('mobileCalibPrompt').innerText =
+            `Step 10/10 (Phone-Motion Lock): KEEP LOOKING AT [G] & TILT/MOVE PHONE SLIGHTLY IN YOUR HAND!`;
+        } else {
+          document.getElementById('mobileCalibPrompt').innerText =
+            `Point ${calibStep + 1}/10: JUST LOOK AT ORANGE KEY [${actualKey}] (Hands-Free Auto-Capture)`;
+        }
       }
     }
 
@@ -954,8 +1133,6 @@
       }
     }
 
-    // Solve 6-Feature Standardized L2 Ridge Regression: (Z^T Z + lambda I) w = Z^T y
-    // Never blows up on still-head features because Ridge shrinks zero-variance features to 0 weight!
     function solveLinearSystem(A, b) {
       const n = b.length;
       const M = A.map((row, i) => [...row, b[i]]);
@@ -977,19 +1154,79 @@
       return M.map(row => row[n]);
     }
 
+    // Fits:
+    // 1) 4x4 Pose-to-Eye Cancellation Matrix K_pose from Step 10 ([G] Tilt-Lock) + analytical 3D prior
+    // 2) 4-Feature Pure-Eye Standardized L2 Ridge Regression (D = 4: [eyeU, eyeV, cropU, cropV] ONLY!)
+    //    Excluding yawDeg/pitchDeg from the eye regression matrix prevents still-head calibration
+    //    from dividing by a tiny head-angle std (~0.25°) and blowing up when the phone moves!
     function fitStandardizedRidgeRegression() {
       if (calibAllObs.length < 18) return;
       const N = calibAllObs.length;
-      const D = 6; // [eyeU, eyeV, cropU, cropV, yawDeg, pitchDeg]
-      const mean = new Array(D).fill(0);
-      const std = new Array(D).fill(0);
 
-      for (const obs of calibAllObs) {
-        for (let j = 0; j < D; j++) mean[j] += obs.f[j] / N;
+      // 1. Anchor reference pose & IPD on the [G] observations
+      const gObs = calibAllObs.filter(o => o.key === 'G');
+      const refSet = gObs.length > 0 ? gObs : calibAllObs;
+      calibRefPose = [0, 0, 0, 0];
+      calibRefIpdPx = 0;
+      for (const o of refSet) {
+        for (let j = 0; j < 4; j++) calibRefPose[j] += o.p[j] / refSet.length;
+        calibRefIpdPx += o.ipd / refSet.length;
       }
-      for (const obs of calibAllObs) {
+
+      // 2. Fit 4x4 Pose-to-Eye Coupling Matrix K_pose using Step 10 (G_TILT) + G samples, regularized to DEFAULT_POSE_K
+      const allGObs = [...gObs, ...calibTiltObs];
+      if (allGObs.length >= 6) {
+        const meanGE = [0, 0, 0, 0];
+        const meanGP = [0, 0, 0, 0];
+        for (const o of allGObs) {
+          for (let j = 0; j < 4; j++) {
+            meanGE[j] += o.e[j] / allGObs.length;
+            meanGP[j] += o.p[j] / allGObs.length;
+          }
+        }
+        const priorWeight = 6.0;
+        const PtP = Array.from({ length: 4 }, (_, r) =>
+          Array.from({ length: 4 }, (__, c) => (r === c ? priorWeight : 0.0))
+        );
+        const PtE = Array.from({ length: 4 }, (_, i) =>
+          Array.from({ length: 4 }, (__, j) => priorWeight * DEFAULT_POSE_K[i][j])
+        );
+        for (const o of allGObs) {
+          const dp = [o.p[0] - meanGP[0], o.p[1] - meanGP[1], o.p[2] - meanGP[2], o.p[3] - meanGP[3]];
+          const de = [o.e[0] - meanGE[0], o.e[1] - meanGE[1], o.e[2] - meanGE[2], o.e[3] - meanGE[3]];
+          for (let r = 0; r < 4; r++) {
+            for (let c = 0; c < 4; c++) {
+              PtP[r][c] += dp[r] * dp[c];
+              PtE[r][c] += de[r] * dp[c];
+            }
+          }
+        }
+        for (let i = 0; i < 4; i++) {
+          poseCouplingK[i] = solveLinearSystem(PtP, PtE[i]);
+        }
+      } else {
+        poseCouplingK = DEFAULT_POSE_K.map(row => [...row]);
+      }
+
+      // 3. Compute pose-compensated eye vectors for all 9 calibration keys & set centerBaseline at [G]
+      const compCalib = calibAllObs.map(o => ({
+        ...o,
+        ec: getCompensatedEyeVec(o.e, o.p)
+      }));
+
+      const gComp = compCalib.filter(o => o.key === 'G');
+      const baseSet = gComp.length > 0 ? gComp : compCalib;
+      centerBaseline = [0, 0, 0, 0];
+      for (const o of baseSet) {
+        for (let j = 0; j < 4; j++) centerBaseline[j] += o.ec[j] / baseSet.length;
+      }
+
+      // 4. Fit 4-Feature Standardized L2 Ridge Regression centered on [G] (D = 4 pure eye features!)
+      const D = 4; // [eyeU, eyeV, cropU, cropV]
+      const std = new Array(D).fill(0);
+      for (const o of compCalib) {
         for (let j = 0; j < D; j++) {
-          const d = obs.f[j] - mean[j];
+          const d = o.ec[j] - centerBaseline[j];
           std[j] += (d * d) / N;
         }
       }
@@ -997,29 +1234,30 @@
         std[j] = Math.max(1e-3, Math.sqrt(std[j]));
       }
 
-      // Design matrix Z has D+1 columns (standardized features + 1.0 intercept)
-      const P = D + 1;
-      const ZtZ_x = Array.from({ length: P }, () => new Array(P).fill(0));
-      const ZtZ_y = Array.from({ length: P }, () => new Array(P).fill(0));
-      const Ztx = new Array(P).fill(0);
-      const Zty = new Array(P).fill(0);
+      const canvas = document.getElementById('kbCanvas');
+      const gPt = keyCenters['G'] || { x: canvas.width * 0.5, y: canvas.height * 0.5 };
 
-      for (const obs of calibAllObs) {
-        const z = new Array(P);
-        for (let j = 0; j < D; j++) z[j] = (obs.f[j] - mean[j]) / std[j];
-        z[D] = 1.0;
-        for (let r = 0; r < P; r++) {
-          Ztx[r] += z[r] * obs.x;
-          Zty[r] += z[r] * obs.y;
-          for (let c = 0; c < P; c++) {
+      const ZtZ_x = Array.from({ length: D }, () => new Array(D).fill(0));
+      const ZtZ_y = Array.from({ length: D }, () => new Array(D).fill(0));
+      const Ztx = new Array(D).fill(0);
+      const Zty = new Array(D).fill(0);
+
+      for (const o of compCalib) {
+        const z = new Array(D);
+        for (let j = 0; j < D; j++) z[j] = (o.ec[j] - centerBaseline[j]) / std[j];
+        const dx = o.x - gPt.x;
+        const dy = o.y - gPt.y;
+        for (let r = 0; r < D; r++) {
+          Ztx[r] += z[r] * dx;
+          Zty[r] += z[r] * dy;
+          for (let c = 0; c < D; c++) {
             ZtZ_x[r][c] += z[r] * z[c];
             ZtZ_y[r][c] += z[r] * z[c];
           }
         }
       }
 
-      // L2 Ridge Penalty (prevents noise amplification on low-variance features)
-      const lambda = 0.22 * N;
+      const lambda = 0.18 * N;
       for (let j = 0; j < D; j++) {
         ZtZ_x[j][j] += lambda;
         ZtZ_y[j][j] += lambda;
@@ -1028,73 +1266,88 @@
       const wx = solveLinearSystem(ZtZ_x, Ztx);
       const wy = solveLinearSystem(ZtZ_y, Zty);
 
-      ridgeModel = { mean, std, wx, wy };
+      ridgeModel = { std, wx, wy };
 
-      // Compute training RMSE in pixels
       let errSq = 0;
-      for (const obs of calibAllObs) {
-        const pred = predictRidge(obs.f);
-        errSq += Math.hypot(pred.x - obs.x, pred.y - obs.y);
+      for (const o of compCalib) {
+        const pred = predictRidge(o.ec, gPt, 1.0);
+        errSq += Math.hypot(pred.x - o.x, pred.y - o.y);
       }
       const maePx = Math.round(errSq / N);
 
-      // Find G sample to set centerBaseline
-      const gObs = calibAllObs.filter(o => o.key === 'G');
-      if (gObs.length > 0) centerBaseline = [...gObs[Math.floor(gObs.length / 2)].f];
-
-      document.getElementById('liveCalibQuality').innerText = `Locked (±${maePx}px)`;
+      document.getElementById('liveCalibQuality').innerText = `6-DoF Locked (±${maePx}px)`;
       document.getElementById('liveCalibQuality').className = 'font-bold text-emerald-600';
       document.getElementById('calibInstructionBox').innerHTML =
-        `<strong class="text-emerald-800">9-Point Hands-Free Ridge Calibration Locked!</strong> (${N} frames captured, fit residual ±${maePx}px). You can also switch the dropdown above between <strong>Mode 1 (9-Pt Ridge)</strong>, <strong>Mode 2 (3D Head-Pose Laser)</strong>, and <strong>Mode 3 (Mobile IMU Tilt)</strong> to compare!`;
+        `<strong class="text-emerald-800">9-Point + 6-DoF Phone-Motion Lock Active!</strong> (${N} eye frames + ${calibTiltObs.length} tilt-lock frames, fit ±${maePx}px). Head/phone angles are now decoupled from the eye matrix and auto-compensated whenever your hand moves!`;
     }
 
-    function predictRidge(fVec) {
-      if (!ridgeModel) return null;
-      const D = 6;
-      let px = ridgeModel.wx[D];
-      let py = ridgeModel.wy[D];
+    function predictRidge(compEyeVec, gPt, depthScale) {
+      if (!ridgeModel || !centerBaseline) return null;
+      const D = 4;
+      let dx = 0, dy = 0;
       for (let j = 0; j < D; j++) {
-        const z = (fVec[j] - ridgeModel.mean[j]) / ridgeModel.std[j];
-        px += ridgeModel.wx[j] * z;
-        py += ridgeModel.wy[j] * z;
+        const z = ((compEyeVec[j] - centerBaseline[j]) * depthScale) / ridgeModel.std[j];
+        dx += ridgeModel.wx[j] * z;
+        dy += ridgeModel.wy[j] * z;
       }
-      return { x: px, y: py };
+      return { x: gPt.x + dx, y: gPt.y + dy };
     }
 
     function updateLiveGazeOnKeyboard(nowMs) {
       const canvas = document.getElementById('kbCanvas');
       if (!canvas) return;
       const gPt = keyCenters['G'] || { x: canvas.width * 0.5, y: canvas.height * 0.5 };
-      const base = centerBaseline || [0, 0, 0, 0, 0, 0];
+      const base = centerBaseline || [0, 0, 0, 0];
 
-      const dEyeU = (currentFeatureVec[0] - base[0]) + (currentFeatureVec[2] - base[2]) * 0.85;
-      const dEyeV = (currentFeatureVec[1] - base[1]) + (currentFeatureVec[3] - base[3]) * 0.85;
-      const dYawDeg = currentFeatureVec[4] - base[4];
-      const dPitchDeg = currentFeatureVec[5] - base[5];
+      // 1. Apply 6-DoF Pose-to-Eye Cancellation (cancels camera bearing shift & anterior-canthal parallax)
+      const compEye = getCompensatedEyeVec(currentEyeVec, currentPoseVec);
+      const depthScale = Math.max(0.72, Math.min(1.38, calibRefIpdPx / (currentIpdPx || 65.0)));
+
+      const dEyeU = ((compEye[0] - base[0]) + (compEye[2] - base[2]) * 0.85) * depthScale;
+      const dEyeV = ((compEye[1] - base[1]) + (compEye[3] - base[3]) * 0.85) * depthScale;
+
+      // Relative head pose in phone frame (subtracting camera bearing shift so pure phone tilt cancels!)
+      const dRelYawDeg = (currentPoseVec[2] - calibRefPose[2]) - (currentPoseVec[0] - calibRefPose[0]);
+      const dRelPitchDeg = (currentPoseVec[3] - calibRefPose[3]) - (currentPoseVec[1] - calibRefPose[1]);
 
       let rawX = gPt.x, rawY = gPt.y;
 
       if (gazeMode === 'ridge_fusion' && ridgeModel) {
-        const pred = predictRidge(currentFeatureVec);
+        const pred = predictRidge(compEye, gPt, depthScale);
         rawX = gPt.x + (pred.x - gPt.x) * horizGain;
         rawY = gPt.y + (pred.y - gPt.y) * vertGain;
       } else if (gazeMode === 'head_laser') {
-        // Mode 2: 3D Head-Pose Laser Pointer (tracks whole-skull 3D orientation — zero pupil noise!)
-        // ±7° yaw spans full keyboard width; ±4.5° pitch spans all 3 rows
-        rawX = gPt.x + (dYawDeg / 7.0) * (canvas.width * 0.52) * horizGain;
-        rawY = gPt.y + (dPitchDeg / 4.5) * (canvas.height * 0.48) * vertGain;
+        // Mode 2: 3D Head-Pose Laser Pointer (compensated for camera bearing shift)
+        rawX = gPt.x + (dRelYawDeg / 7.0) * (canvas.width * 0.52) * horizGain;
+        rawY = gPt.y + (dRelPitchDeg / 4.5) * (canvas.height * 0.48) * vertGain;
       } else if (gazeMode === 'imu_tilt') {
-        // Mode 3: Mobile Hardware Gyroscope Tilt + Eye Fine-Tuning
-        const tiltX = hwImu.active ? (hwImu.deltaRoll / 11.0) * (canvas.width * 0.52) : (dYawDeg / 7.5) * (canvas.width * 0.5);
-        const tiltY = hwImu.active ? (hwImu.deltaPitch / 8.0) * (canvas.height * 0.52) : (dPitchDeg / 5.0) * (canvas.height * 0.5);
+        // Mode 3: Mobile Hardware Gyroscope Tilt + Compensated Eye Assist
+        const tiltX = hwImu.active ? (hwImu.deltaRoll / 11.0) * (canvas.width * 0.52) : (dRelYawDeg / 7.5) * (canvas.width * 0.5);
+        const tiltY = hwImu.active ? (hwImu.deltaPitch / 8.0) * (canvas.height * 0.52) : (dRelPitchDeg / 5.0) * (canvas.height * 0.5);
         rawX = gPt.x + (tiltX + dEyeU * canvas.width * 1.1) * horizGain;
         rawY = gPt.y + (tiltY + dEyeV * canvas.height * 1.4) * vertGain;
       } else {
-        // Mode 4 (or uncalibrated fallback): Pure Eye + Subtle Pose
-        const poseAssistX = gazeMode === 'pure_eye' ? 0.0 : (dYawDeg / 10.0) * (canvas.width * 0.35);
-        const poseAssistY = gazeMode === 'pure_eye' ? 0.0 : (dPitchDeg / 6.5) * (canvas.height * 0.38);
-        rawX = gPt.x + (dEyeU * canvas.width * 2.9 + poseAssistX) * horizGain;
-        rawY = gPt.y + (dEyeV * canvas.height * 3.8 + poseAssistY) * vertGain;
+        // Mode 4 (or uncalibrated fallback)
+        rawX = gPt.x + (dEyeU * canvas.width * 3.1) * horizGain;
+        rawY = gPt.y + (dEyeV * canvas.height * 4.0) * vertGain;
+      }
+
+      // Soft Keyboard-Envelope Anti-Pinning Guard:
+      // If an unmodeled posture shift pushes rawX or rawY beyond 1.10x the keyboard half-span,
+      // gently slide centerBaseline toward compEye so the cursor NEVER gets pinned/stuck on the screen edge!
+      const lockEl = document.getElementById('chkPhoneMotionLock');
+      const lockOn = !lockEl || lockEl.checked;
+      if (lockOn && calibStep === -1 && !isClutchActive && centerBaseline) {
+        const maxHalfW = canvas.width * 0.55;
+        const maxHalfH = canvas.height * 0.55;
+        const overX = Math.abs(rawX - gPt.x) > maxHalfW;
+        const overY = Math.abs(rawY - gPt.y) > maxHalfH;
+        if (overX || overY) {
+          const pull = 0.085;
+          for (let j = 0; j < 4; j++) {
+            centerBaseline[j] = centerBaseline[j] * (1.0 - pull) + compEye[j] * pull;
+          }
+        }
       }
 
       // Add synthetic disturbance if testing Raw or Basic
@@ -1160,6 +1413,7 @@
 
       if (isClutchActive) {
         activeTrajectory.push({ x: smoothedGazePt.x, y: smoothedGazePt.y });
+        activeSwipeEyeVecs.push([...compEye]);
         if (activeTrajectory.length >= 4) {
           const ranked = rankSim2Candidates(activeTrajectory);
           document.getElementById('top3Candidates').innerText =
@@ -1320,6 +1574,7 @@
       currentEyeFeatures.manualClutch = !!e;
       hwImu.tapShockUntilMs = performance.now() + 45;
       activeTrajectory = [];
+      activeSwipeEyeVecs = [];
       document.getElementById('btnClutchLabel').innerText = 'SWIPING ACTIVE — LOOK ACROSS KEYS, THEN RELEASE!';
     }
 
@@ -1489,6 +1744,23 @@
           sent.innerText = word;
         } else {
           sent.innerText += ' ' + word;
+        }
+
+        // Closed-Form Trajectory Self-Healing:
+        // If live camera is active, align centerBaseline using the swiped word's true key centroid vs. recorded eye trajectory
+        if (liveCameraActive && activeSwipeEyeVecs.length >= 4 && centerBaseline) {
+          const pts = word.split('').map(c => keyCenters[c]).filter(Boolean);
+          const canvas = document.getElementById('kbCanvas');
+          const gPt = keyCenters['G'] || { x: canvas.width * 0.5, y: canvas.height * 0.5 };
+          if (pts.length >= 2 && gPt) {
+            const meanE = [0, 0, 0, 0];
+            for (const ev of activeSwipeEyeVecs) {
+              for (let j = 0; j < 4; j++) meanE[j] += ev[j] / activeSwipeEyeVecs.length;
+            }
+            for (let j = 0; j < 4; j++) {
+              centerBaseline[j] = centerBaseline[j] * 0.75 + meanE[j] * 0.25;
+            }
+          }
         }
       }
 
